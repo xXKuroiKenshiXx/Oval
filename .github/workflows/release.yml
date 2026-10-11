@@ -76,7 +76,8 @@ jobs:
       - name: Build
         run: |
           cp linux/*.deb packaging/flatpak/oval.deb
-          flatpak-builder --user --install-deps-from=flathub --repo=repo --force-clean             build packaging/flatpak/io.github.xxkuroikenshixx.oval.yml
+          # The container ships Flathub and the GNOME SDK system-wide.
+          flatpak-builder --install-deps-from=flathub --repo=repo --force-clean             build packaging/flatpak/io.github.xxkuroikenshixx.oval.yml
           mkdir dist
           flatpak build-bundle --runtime-repo=https://dl.flathub.org/repo/flathub.flatpakrepo             repo "dist/Oval_${GITHUB_REF_NAME#v}_x86_64.flatpak" io.github.xxkuroikenshixx.oval
       - uses: actions/upload-artifact@v4
