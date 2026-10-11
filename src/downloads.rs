@@ -6,17 +6,15 @@
 //! hours) and "stop" keeps what was recorded instead of throwing it away.
 
 use std::path::{Path, PathBuf};
-use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager};
-use tokio::io::{AsyncBufReadExt, BufReader};
-use tokio::process::Command;
 
-use crate::{platform, settings, tools};
+use crate::engine::{self, Line};
+use crate::settings;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -80,7 +78,7 @@ pub struct Job {
     #[serde(skip)]
     stem: Option<String>,
     #[serde(skip)]
-    pid: Option<u32>,
+    pid: Option<engine::Handle>,
     /// Streams in the selected format ("137+140" = 2) and how many finished.
     #[serde(skip)]
     parts: u32,
@@ -89,6 +87,9 @@ pub struct Job {
     /// Bumped on every (re)start so a stale process can't update the job.
     #[serde(skip)]
     run: u64,
+    /// Already retried once with YouTube's fallback clients.
+    #[serde(skip)]
+    retried: bool,
 }
 
 #[derive(Deserialize)]
@@ -108,6 +109,9 @@ pub fn download_root(app: &AppHandle) -> PathBuf {
     if let Some(dir) = settings::get(app).folder {
         return dir;
     }
+    #[cfg(target_os = "android")]
+    return PathBuf::from("/storage/emulated/0/Download/Oval");
+    #[cfg(not(target_os = "android"))]
     dirs::download_dir()
         .or_else(dirs::home_dir)
         .unwrap_or_else(std::env::temp_dir)
@@ -176,6 +180,7 @@ impl Queue {
                     parts: 1,
                     parts_done: 0,
                     run: 0,
+                    retried: false,
                 };
                 emit_job(app, &job);
                 added.push(job.clone());
@@ -199,7 +204,7 @@ impl Queue {
             }
         });
         if let Some(pid) = pid.flatten() {
-            platform::kill_tree(pid);
+            engine::kill(app, pid);
         }
         schedule(app);
     }
@@ -217,7 +222,7 @@ impl Queue {
             }
         });
         if let Some(pid) = pid.flatten() {
-            platform::kill_tree(pid);
+            engine::kill(app, pid);
         }
     }
 
@@ -241,9 +246,10 @@ impl Queue {
         if let Some(job) = removed {
             let _ = app.emit("job-removed", id);
             let finished = job.status == Status::Done;
+            let app = app.clone();
             tauri::async_runtime::spawn(async move {
                 if let Some(pid) = job.pid {
-                    platform::kill_tree(pid);
+                    engine::kill(&app, pid);
                     // Give Windows a moment to release the file handles.
                     tokio::time::sleep(std::time::Duration::from_millis(400)).await;
                 }
@@ -299,6 +305,40 @@ impl Queue {
     }
 }
 
+/// YouTube flags connections that fetch a lot ("confirm you're not a bot").
+/// Its embedded and mobile web players still answer then, so for a while
+/// after a block every YouTube request also asks those, a bit more slowly.
+static YOUTUBE_FALLBACK_UNTIL: Mutex<Option<Instant>> = Mutex::new(None);
+const YOUTUBE_FALLBACK_FOR: Duration = Duration::from_secs(30 * 60);
+
+pub(crate) fn is_youtube(url: &str) -> bool {
+    let u = url.to_ascii_lowercase();
+    u.contains("youtube.com/") || u.contains("youtu.be/")
+}
+
+/// Extra yt-dlp arguments for YouTube while the fallback is active.
+pub(crate) fn youtube_args(url: &str) -> Vec<String> {
+    let active = YOUTUBE_FALLBACK_UNTIL
+        .lock()
+        .unwrap()
+        .is_some_and(|until| Instant::now() < until);
+    if !active || !is_youtube(url) {
+        return Vec::new();
+    }
+    [
+        "--extractor-args",
+        "youtube:player_client=default,web_embedded,mweb",
+        "--sleep-requests",
+        "1",
+    ]
+    .map(String::from)
+    .to_vec()
+}
+
+fn is_youtube_block(error: &str) -> bool {
+    error.starts_with("YouTube frenó")
+}
+
 /// Starts queued jobs until the concurrency limit is reached. Live recordings
 /// start right away and don't count towards the limit.
 pub fn schedule(app: &AppHandle) {
@@ -341,13 +381,29 @@ pub fn schedule(app: &AppHandle) {
                     j.speed = 0.0;
                 });
             }
+            retry_if_blocked(&app, id);
             schedule(&app);
         });
     }
 }
 
+/// A YouTube block turns on the fallback players and quietly retries the job
+/// once, so the user doesn't have to.
+fn retry_if_blocked(app: &AppHandle, id: u64) {
+    queue(app).update(app, id, |j| {
+        let blocked = j.status == Status::Error
+            && j.error.as_deref().is_some_and(is_youtube_block)
+            && is_youtube(&j.url);
+        if blocked && !j.retried {
+            *YOUTUBE_FALLBACK_UNTIL.lock().unwrap() = Some(Instant::now() + YOUTUBE_FALLBACK_FOR);
+            j.retried = true;
+            j.status = Status::Queued;
+            j.error = None;
+        }
+    });
+}
+
 async fn run_job(app: &AppHandle, id: u64, run: u64) -> Result<(), String> {
-    let tools = tools::ensure(app).await?;
     let (url, mode, quality, dir, live) = {
         let q = queue(app);
         let jobs = q.jobs.lock().unwrap();
@@ -359,15 +415,14 @@ async fn run_job(app: &AppHandle, id: u64, run: u64) -> Result<(), String> {
                 j.dir.clone(),
                 j.live,
             ),
-            None => return Ok(()), // paused or canceled while the engine loaded
+            None => return Ok(()),
         }
     };
     tokio::fs::create_dir_all(&dir)
         .await
         .map_err(|e| e.to_string())?;
 
-    let mut cmd = Command::new(&tools.ytdlp);
-    cmd.args([
+    let mut args: Vec<String> = [
         "--ignore-config",
         "--no-warnings",
         "--newline",
@@ -385,130 +440,119 @@ async fn run_job(app: &AppHandle, id: u64, run: u64) -> Result<(), String> {
         "--no-mtime",
         "--concurrent-fragments",
         "8",
-    ]);
-    cmd.arg("-P").arg(&dir);
-    if let Some(ff) = &tools.ffmpeg_dir {
-        cmd.arg("--ffmpeg-location").arg(ff);
-    }
-    match mode {
-        _ if live => {
-            // Recorded as MPEG-TS straight into the final name: a TS file stays
-            // playable when the process is cut, and "stop" remuxes it to MP4.
-            let sort = match &quality {
-                Some(h) => format!("res:{h},vcodec:h264,acodec:aac"),
-                None => "res,vcodec:h264,acodec:aac".into(),
-            };
-            cmd.args([
-                "-o",
-                "%(uploader,channel,id).80B %(epoch>%Y-%m-%d %H-%M-%S)s.%(ext)s",
-                "-f",
-                "b/bv*+ba",
-                "-S",
-                &sort,
-                "--hls-use-mpegts",
-                "--no-part",
-            ]);
-        }
-        Mode::Video => {
-            cmd.args(["-o", "%(title).150B [%(id)s].%(ext)s"]);
-            // "res:1080" = the best stream no taller than 1080p. H.264/AAC wins ties so
-            // files open everywhere, editors included; above 1080p YouTube has no H.264.
-            let sort = match &quality {
-                Some(h) => format!("res:{h},vcodec:h264,acodec:aac"),
-                None => "res,vcodec:h264,acodec:aac".into(),
-            };
-            cmd.args([
-                "-f",
-                "bv*+ba/b",
-                "-S",
-                &sort,
-                "--merge-output-format",
-                "mp4",
-                // Single-file downloads (archive.org, some sites) come as AVI,
-                // FLV or MOV; repackage them so everything ends up as MP4.
-                "--remux-video",
-                "avi>mp4/flv>mp4/mov>mp4/webm>mp4",
-            ]);
-        }
+    ]
+    .map(String::from)
+    .to_vec();
+    args.push("-P".into());
+    args.push(dir.display().to_string());
+    // "res:1080" = the best stream no taller than 1080p. H.264/AAC wins ties so
+    // files open everywhere, editors included; above 1080p YouTube has no H.264.
+    let sort = match &quality {
+        Some(h) => format!("res:{h},vcodec:h264,acodec:aac"),
+        None => "res,vcodec:h264,acodec:aac".into(),
+    };
+    let extra: Vec<String> = match mode {
+        // Recorded as MPEG-TS straight into the final name: a TS file stays
+        // playable when the process is cut, and "stop" turns it into an MP4.
+        _ if live => vec![
+            "-o".into(),
+            "%(uploader,channel,id).80B %(epoch>%Y-%m-%d %H-%M-%S)s.%(ext)s".into(),
+            "-f".into(),
+            "b/bv*+ba".into(),
+            "-S".into(),
+            sort,
+            "--hls-use-mpegts".into(),
+            "--no-part".into(),
+        ],
+        Mode::Video => vec![
+            "-o".into(),
+            "%(title).150B [%(id)s].%(ext)s".into(),
+            "-f".into(),
+            "bv*+ba/b".into(),
+            "-S".into(),
+            sort,
+            "--merge-output-format".into(),
+            "mp4".into(),
+            // Single-file downloads (archive.org, some sites) come as AVI,
+            // FLV or MOV; repackage them so everything ends up as MP4.
+            "--remux-video".into(),
+            "avi>mp4/flv>mp4/mov>mp4/webm>mp4".into(),
+        ],
         Mode::Audio => {
-            cmd.args(["-o", "%(title).150B [%(id)s].%(ext)s"]);
             let bitrate = quality
                 .as_ref()
                 .map_or_else(|| "0".into(), |k| format!("{k}K"));
-            cmd.args([
-                "-f",
-                "ba/b",
-                "-x",
-                "--audio-format",
-                "mp3",
-                "--audio-quality",
-                &bitrate,
-            ]);
+            vec![
+                "-o".into(),
+                "%(title).150B [%(id)s].%(ext)s".into(),
+                "-f".into(),
+                "ba/b".into(),
+                "-x".into(),
+                "--audio-format".into(),
+                "mp3".into(),
+                "--audio-quality".into(),
+                bitrate,
+            ]
         }
+    };
+    args.extend(extra);
+    args.extend(youtube_args(&url));
+    // Android's bundled FFmpeg 7.1 refuses YouTube's live audio segments
+    // ("extension mismatches allowed extensions") unless told not to be picky.
+    #[cfg(target_os = "android")]
+    if live {
+        args.push("--downloader-args".into());
+        args.push("ffmpeg_i:-extension_picky 0".into());
     }
-    cmd.arg("--").arg(&url);
-    cmd.env("PYTHONIOENCODING", "utf-8")
-        .env("PYTHONUTF8", "1")
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .kill_on_drop(true);
-    platform::prepare(&mut cmd);
+    args.push("--".into());
+    args.push(url);
 
-    let mut child = cmd
-        .spawn()
-        .map_err(|e| format!("No se pudo iniciar yt-dlp: {e}"))?;
-    platform::adopt_child(&child);
-    let pid = child.id();
+    let mut task = engine::ytdlp(app, args).await?;
     let q = queue(app);
     let mut still_ours = false;
     q.update_run(app, id, run, |j| {
-        j.pid = pid;
+        j.pid = Some(task.handle);
         still_ours = true;
     });
     if !still_ours {
-        // Paused between scheduling and spawning.
-        let _ = child.start_kill();
+        // Paused or canceled while the engine was getting ready.
+        engine::kill(app, task.handle);
         return Ok(());
     }
-
-    let stderr = child.stderr.take().expect("piped stderr");
-    let err_task = tokio::spawn(async move {
-        let mut last = None;
-        let mut lines = BufReader::new(stderr).split(b'\n');
-        while let Ok(Some(raw)) = lines.next_segment().await {
-            let line = String::from_utf8_lossy(&raw).trim().to_string();
-            if let Some(msg) = line.strip_prefix("ERROR:") {
-                last = Some(clean_error(msg));
-            }
-        }
-        last
-    });
 
     let finished = Arc::new(AtomicBool::new(false));
     if live {
         tokio::spawn(watch_recording(app.clone(), id, run, finished.clone()));
     }
 
-    let stdout = child.stdout.take().expect("piped stdout");
-    let mut lines = BufReader::new(stdout).split(b'\n');
-    while let Ok(Some(raw)) = lines.next_segment().await {
-        let line = String::from_utf8_lossy(&raw);
-        handle_line(app, id, run, live, line.trim());
+    let mut error = None;
+    let mut last_stderr = None;
+    while let Some(line) = task.next_line().await {
+        match line {
+            Line::Out(line) => handle_line(app, id, run, live, &line),
+            Line::Err(line) => {
+                if let Some(msg) = line.strip_prefix("ERROR:") {
+                    error = Some(clean_error(msg));
+                } else if !line.is_empty() && !line.starts_with("WARNING:") {
+                    last_stderr = Some(line);
+                }
+            }
+        }
     }
-
-    let status = child.wait().await.map_err(|e| e.to_string())?;
+    // Without an "ERROR:" line (Android reports failures its own way), the last
+    // thing yt-dlp printed is still more useful than a generic message.
+    let error = error.or_else(|| last_stderr.map(|l| clean_error(&l)));
+    let success = task.success();
     finished.store(true, Ordering::Relaxed);
-    let error = err_task.await.ok().flatten();
 
     if live {
-        return finish_recording(app, &tools, id, run, status.success(), error).await;
+        return finish_recording(app, id, run, success, error).await;
     }
     q.update_run(app, id, run, |j| {
         j.pid = None;
         j.speed = 0.0;
         j.eta = None;
-        if status.success() {
+        if success {
             j.status = Status::Done;
             j.progress = 1.0;
             if j.total > 0.0 {
@@ -563,7 +607,6 @@ async fn watch_recording(app: AppHandle, id: u64, run: u64, finished: Arc<Atomic
 /// disk is kept, so a dropped connection doesn't lose the stream.
 async fn finish_recording(
     app: &AppHandle,
-    tools: &tools::Tools,
     id: u64,
     run: u64,
     success: bool,
@@ -591,7 +634,7 @@ async fn finish_recording(
         raw
     } else {
         tokio::time::sleep(Duration::from_millis(500)).await; // let Windows release the file
-        remux_to_mp4(tools, &raw).await
+        finalize_recording(app, &raw).await
     };
     let size = std::fs::metadata(&path).map_or(0.0, |m| m.len() as f64);
     q.update_run(app, id, run, |j| {
@@ -606,21 +649,25 @@ async fn finish_recording(
 
 /// Turns the MPEG-TS recording into a regular MP4 without re-encoding. If
 /// FFmpeg fails the `.ts` file is kept, which every player opens anyway.
-async fn remux_to_mp4(tools: &tools::Tools, raw: &Path) -> PathBuf {
+#[cfg(desktop)]
+async fn finalize_recording(app: &AppHandle, raw: &Path) -> PathBuf {
     let ts = raw.with_extension("ts");
     if std::fs::rename(raw, &ts).is_err() {
         return raw.to_path_buf();
     }
+    let Ok(tools) = crate::tools::ensure(app).await else {
+        return ts;
+    };
     let mp4 = raw.with_extension("mp4");
-    let mut cmd = Command::new(tools.ffmpeg());
+    let mut cmd = tokio::process::Command::new(tools.ffmpeg());
     cmd.args(["-y", "-loglevel", "error", "-i"])
         .arg(&ts)
         .args(["-map", "0", "-c", "copy", "-movflags", "+faststart"])
         .arg(&mp4)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
-    platform::prepare(&mut cmd);
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    crate::platform::prepare(&mut cmd);
     match cmd.status().await {
         Ok(s) if s.success() => {
             let _ = std::fs::remove_file(&ts);
@@ -630,6 +677,16 @@ async fn remux_to_mp4(tools: &tools::Tools, raw: &Path) -> PathBuf {
             let _ = std::fs::remove_file(&mp4);
             ts
         }
+    }
+}
+
+/// On Android the recording stays as MPEG-TS, which phone players open fine.
+#[cfg(mobile)]
+async fn finalize_recording(_app: &AppHandle, raw: &Path) -> PathBuf {
+    let ts = raw.with_extension("ts");
+    match std::fs::rename(raw, &ts) {
+        Ok(()) => ts,
+        Err(_) => raw.to_path_buf(),
     }
 }
 
@@ -744,7 +801,10 @@ pub(crate) fn clean_error(msg: &str) -> String {
         "El canal no está en directo ahora".into()
     } else if lower.contains("unsupported url") {
         "Este enlace no es compatible".into()
-    } else if lower.contains("not a bot") || lower.contains("too many requests") {
+    } else if lower.contains("not a bot")
+        || lower.contains("too many requests")
+        || lower.contains("page needs to be reloaded")
+    {
         // YouTube throttles connections that fetch a lot in a short time.
         "YouTube frenó la conexión por exceso de descargas; reintenta en unos minutos".into()
     } else if lower.contains("private") {
@@ -764,6 +824,48 @@ fn short_url(url: &str) -> String {
         .trim_start_matches("http://")
         .trim_start_matches("www.");
     s.chars().take(60).collect()
+}
+
+/// IDs of videos already on disk: Oval names files "Title [id].ext", so the
+/// download folder (and the channel's subfolder) tells what is there.
+pub fn downloaded_ids(app: &AppHandle, folder: Option<&str>) -> Vec<String> {
+    let root = download_root(app);
+    let mut dirs = vec![root.clone()];
+    if let Some(f) = folder.map(sanitize).filter(|f| !f.is_empty()) {
+        dirs.push(root.join(f));
+    }
+    let mut ids = Vec::new();
+    for dir in dirs {
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for e in entries.flatten() {
+            let name = e.file_name().to_string_lossy().into_owned();
+            if let Some(id) = id_from_filename(&name) {
+                ids.push(id.to_string());
+            }
+        }
+    }
+    ids.sort();
+    ids.dedup();
+    ids
+}
+
+fn id_from_filename(name: &str) -> Option<&str> {
+    const MEDIA: &[&str] = &[
+        "mp4", "mkv", "webm", "mp3", "m4a", "opus", "avi", "mov", "ts",
+    ];
+    let (stem, ext) = name.rsplit_once('.')?;
+    if !MEDIA.contains(&ext.to_ascii_lowercase().as_str()) {
+        return None;
+    }
+    let inner = stem.strip_suffix(']')?;
+    let (_, id) = inner.rsplit_once('[')?;
+    (!id.is_empty()
+        && id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'))
+    .then_some(id)
 }
 
 pub fn sanitize(name: &str) -> String {
@@ -805,6 +907,18 @@ mod tests {
             clean_error("[youtube] x: Sign in to confirm you’re not a bot. Use --cookies")
                 .starts_with("YouTube frenó")
         );
+    }
+
+    #[test]
+    fn ids_come_from_file_names() {
+        assert_eq!(
+            id_from_filename("Coffee Run [PVGeM40dABA].mp4"),
+            Some("PVGeM40dABA")
+        );
+        assert_eq!(id_from_filename("a [b] c [x_y-1].mp3"), Some("x_y-1"));
+        assert_eq!(id_from_filename("notes [abc].txt"), None);
+        assert_eq!(id_from_filename("clip.mp4"), None);
+        assert!(is_youtube("https://youtu.be/x") && !is_youtube("https://vimeo.com/1"));
     }
 
     #[test]

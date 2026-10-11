@@ -1,6 +1,7 @@
 /target
-/gen
+/gen/schemas
 *.pdb
 .DS_Store
 Thumbs.db
 /dist
+/_site

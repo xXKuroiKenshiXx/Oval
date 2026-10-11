@@ -78,7 +78,11 @@
             <button type="button" data-ctab="shorts">Shorts</button>
             <button type="button" data-ctab="streams">Directos</button>
           </div>
-          <span class="ccount" id="ccount"></span>
+          <label class="csearch" title="Buscar en el canal">
+            <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6"/><path d="M20 20l-4.2-4.2"/></svg>
+            <input id="csearch" type="search" placeholder="Buscar en el canal" spellcheck="false" autocomplete="off">
+            <span class="ccount" id="ccount"></span>
+          </label>
           <div class="seg small" role="group" aria-label="Selección">
             <button type="button" id="all">Todos</button>
             <button type="button" id="none">Ninguno</button>

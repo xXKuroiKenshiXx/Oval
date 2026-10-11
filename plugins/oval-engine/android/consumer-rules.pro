@@ -1,0 +1,2 @@
+-keep class com.yausername.** { *; }
+-keep class io.github.xxkuroikenshixx.oval.engine.** { *; }

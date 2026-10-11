@@ -21,3 +21,9 @@
   sitios) se completan en segundo plano.
 - Los vídeos que llegan en AVI, FLV, MOV o WebM se reempaquetan a MP4 sin recodificar.
 - Mensaje claro cuando YouTube frena la conexión por exceso de descargas.
+- Si YouTube bloquea ("confirma que no eres un bot"), Oval usa otros reproductores de YouTube
+  durante 30 minutos y reintenta la descarga solo.
+- Deno se descarga en segundo plano si el equipo no tiene un motor de JavaScript.
+- Pestaña Canal: buscador por título y vídeos ya descargados marcados en amarillo.
+- Versión para Android (APK) con el motor integrado.
+- Página web en GitHub Pages con la interfaz real en modo demo.

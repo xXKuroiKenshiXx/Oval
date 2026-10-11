@@ -4,17 +4,15 @@
 //! The fast "flat" listing has no thumbnails on many sites (PeerTube, Vimeo,
 //! ...), so a second, slower pass fills them in afterwards.
 
-use std::process::Stdio;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use serde::Serialize;
 use serde_json::Value;
 use tauri::{AppHandle, Emitter};
-use tokio::io::{AsyncBufReadExt, BufReader};
-use tokio::process::Command;
 
-use crate::{downloads, platform, tools};
+use crate::downloads;
+use crate::engine::{self, Line};
 
 #[derive(Clone, Serialize)]
 pub struct Entry {
@@ -55,17 +53,17 @@ pub struct Summary {
     pub count: usize,
 }
 
-/// The listing currently running: (generation, pid).
-static CURRENT: Mutex<(u64, Option<u32>)> = Mutex::new((0, None));
+/// The listing currently running: (generation, yt-dlp handle).
+static CURRENT: Mutex<(u64, Option<engine::Handle>)> = Mutex::new((0, None));
 
-pub fn cancel() {
-    let pid = {
+pub fn cancel(app: &AppHandle) {
+    let handle = {
         let mut cur = CURRENT.lock().unwrap();
         cur.0 += 1;
         cur.1.take()
     };
-    if let Some(pid) = pid {
-        platform::kill_tree(pid);
+    if let Some(handle) = handle {
+        engine::kill(app, handle);
     }
 }
 
@@ -109,13 +107,11 @@ pub fn normalize(url: &str, tab: &str) -> String {
 /// `token` comes from the UI and is echoed in every batch so it can drop
 /// entries that belong to an older listing.
 pub async fn list(app: &AppHandle, url: &str, tab: &str, token: u64) -> Result<Summary, String> {
-    cancel();
+    cancel(app);
     let listing = CURRENT.lock().unwrap().0;
-    let tools = tools::ensure(app).await?;
     let url = normalize(url, tab);
 
-    let mut cmd = Command::new(&tools.ytdlp);
-    cmd.args([
+    let args = [
         "--ignore-config",
         "--no-warnings",
         "--flat-playlist",
@@ -124,48 +120,37 @@ pub async fn list(app: &AppHandle, url: &str, tab: &str, token: u64) -> Result<S
         "%(.{id,url,webpage_url,title,duration,thumbnail,thumbnails,playlist_uploader,channel,uploader,playlist_title})j",
         "--",
         &url,
-    ])
-    .env("PYTHONIOENCODING", "utf-8")
-    .env("PYTHONUTF8", "1")
-    .stdin(Stdio::null())
-    .stdout(Stdio::piped())
-    .stderr(Stdio::piped())
-    .kill_on_drop(true);
-    platform::prepare(&mut cmd);
-
-    let mut child = cmd.spawn().map_err(|e| e.to_string())?;
-    platform::adopt_child(&child);
+    ]
+    .map(String::from)
+    .to_vec();
+    let mut task = engine::ytdlp(app, args).await?;
     {
         let mut cur = CURRENT.lock().unwrap();
         if cur.0 != listing {
-            let _ = child.start_kill();
+            engine::kill(app, task.handle);
             return Err("cancelled".into());
         }
-        cur.1 = child.id();
+        cur.1 = Some(task.handle);
     }
-
-    let stderr = child.stderr.take().expect("piped stderr");
-    let err_task = tokio::spawn(async move {
-        let mut last = None;
-        let mut lines = BufReader::new(stderr).split(b'\n');
-        while let Ok(Some(raw)) = lines.next_segment().await {
-            let line = String::from_utf8_lossy(&raw).trim().to_string();
-            if let Some(msg) = line.strip_prefix("ERROR:") {
-                last = Some(downloads::clean_error(msg));
-            }
-        }
-        last
-    });
 
     let youtube = url.contains("youtube.com") || url.contains("youtu.be");
     let mut channel: Option<String> = None;
     let mut pending = Vec::new();
     let mut count = 0usize;
     let mut missing = 0usize;
+    let mut error = None;
     let mut last_emit = Instant::now();
-    let mut lines = BufReader::new(child.stdout.take().expect("piped stdout")).split(b'\n');
-    while let Ok(Some(raw)) = lines.next_segment().await {
-        let Ok(v) = serde_json::from_slice::<Value>(&raw) else {
+    while let Some(line) = task.next_line().await {
+        let raw = match line {
+            Line::Out(raw) => raw,
+            Line::Err(err) => {
+                if let Some(msg) = err.strip_prefix("ERROR:") {
+                    error = Some(downloads::clean_error(msg));
+                }
+                continue;
+            }
+        };
+        let Ok(v) = serde_json::from_str::<Value>(&raw) else {
             continue;
         };
         let Some(entry) = parse_entry(&v, youtube) else {
@@ -195,8 +180,7 @@ pub async fn list(app: &AppHandle, url: &str, tab: &str, token: u64) -> Result<S
             last_emit = Instant::now();
         }
     }
-    let status = child.wait().await.ok();
-    let error = err_task.await.ok().flatten();
+    let success = task.success();
     {
         let mut cur = CURRENT.lock().unwrap();
         if cur.0 != listing {
@@ -214,17 +198,11 @@ pub async fn list(app: &AppHandle, url: &str, tab: &str, token: u64) -> Result<S
             },
         );
     }
-    if count == 0 && !status.is_some_and(|s| s.success()) {
+    if count == 0 && !success {
         return Err(error.unwrap_or_else(|| "No se encontraron vídeos".into()));
     }
     if missing > 0 {
-        tauri::async_runtime::spawn(fill_details(
-            app.clone(),
-            tools.ytdlp.clone(),
-            url,
-            token,
-            listing,
-        ));
+        tauri::async_runtime::spawn(fill_details(app.clone(), url, token, listing));
     }
     Ok(Summary {
         token,
@@ -235,15 +213,8 @@ pub async fn list(app: &AppHandle, url: &str, tab: &str, token: u64) -> Result<S
 
 /// Second pass: full extraction of each entry, streamed, only for thumbnails
 /// and durations. Runs until done or until another listing starts.
-async fn fill_details(
-    app: AppHandle,
-    ytdlp: std::path::PathBuf,
-    url: String,
-    token: u64,
-    listing: u64,
-) {
-    let mut cmd = Command::new(ytdlp);
-    cmd.args([
+async fn fill_details(app: AppHandle, url: String, token: u64, listing: u64) {
+    let args = [
         "--ignore-config",
         "--no-warnings",
         "--ignore-errors",
@@ -253,30 +224,29 @@ async fn fill_details(
         "%(.{playlist_index,thumbnail,duration})j",
         "--",
         &url,
-    ])
-    .env("PYTHONIOENCODING", "utf-8")
-    .stdin(Stdio::null())
-    .stdout(Stdio::piped())
-    .stderr(Stdio::null())
-    .kill_on_drop(true);
-    platform::prepare(&mut cmd);
-    let Ok(mut child) = cmd.spawn() else { return };
-    platform::adopt_child(&child);
+    ]
+    .map(String::from)
+    .to_vec();
+    let Ok(mut task) = engine::ytdlp(&app, args).await else {
+        return;
+    };
     {
         let mut cur = CURRENT.lock().unwrap();
         if cur.0 != listing {
+            engine::kill(&app, task.handle);
             return;
         }
-        cur.1 = child.id(); // so `cancel` stops this pass too
+        cur.1 = Some(task.handle); // so `cancel` stops this pass too
     }
     let mut pending = Vec::new();
     let mut last_emit = Instant::now();
-    let mut lines = BufReader::new(child.stdout.take().expect("piped stdout")).split(b'\n');
-    while let Ok(Some(raw)) = lines.next_segment().await {
+    while let Some(line) = task.next_line().await {
         if CURRENT.lock().unwrap().0 != listing {
+            engine::kill(&app, task.handle);
             return;
         }
-        let Ok(v) = serde_json::from_slice::<Value>(&raw) else {
+        let Line::Out(raw) = line else { continue };
+        let Ok(v) = serde_json::from_str::<Value>(&raw) else {
             continue;
         };
         let Some(index) = v.get("playlist_index").and_then(Value::as_u64) else {
@@ -311,7 +281,6 @@ async fn fill_details(
             },
         );
     }
-    let _ = child.wait().await;
     let mut cur = CURRENT.lock().unwrap();
     if cur.0 == listing {
         cur.1 = None;

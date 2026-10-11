@@ -636,6 +636,35 @@ button.pill-icon:hover { background: var(--surface-2); color: var(--text); }
   font-variant-numeric: tabular-nums;
 }
 .ccount b { color: var(--text); }
+.csearch {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 196px;
+  height: 30px;
+  padding: 0 11px 0 10px;
+  border-radius: 999px;
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--line);
+  transition: box-shadow 0.2s, background 0.2s;
+}
+.csearch:focus-within { background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--line-2), 0 0 0 3px var(--mint-soft); }
+.csearch svg { flex: none; width: 14px; height: 14px; color: var(--text-3); }
+.csearch input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--text);
+  font: 600 12px var(--font);
+  user-select: text;
+  -webkit-user-select: text;
+}
+.csearch input::placeholder { color: var(--text-3); font-weight: 500; }
+.csearch input::-webkit-search-cancel-button { display: none; }
+.csearch .ccount { flex: none; font-size: 11px; }
+
 /* Vídeos / Shorts / Directos only mean something on YouTube. */
 .ctools.other #ctabs { visibility: hidden; }
 
@@ -765,6 +794,32 @@ button.pill-icon:hover { background: var(--surface-2); color: var(--text); }
 .tile.off .mark { background: var(--red); color: #fff; transform: rotate(90deg); }
 .tile.off .mark .v { display: none; }
 .tile.off .mark .x { display: block; }
+.tile[hidden] { display: none; }
+.grid.settled .tile { animation: none; } /* don't replay the entrance when filtering */
+
+/* Already in the download folder: yellow, and left out unless tapped. */
+.tile .have-tag {
+  position: absolute;
+  left: 50%;
+  top: 44%;
+  transform: translate(-50%, -50%);
+  display: none;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 700;
+  white-space: nowrap;
+  color: #3b2b00;
+  background: var(--amber);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+}
+.tile.have.off { box-shadow: 0 0 0 2px var(--amber), 0 6px 16px -8px var(--shadow); }
+.tile.have.off img { filter: saturate(0.7) brightness(0.62); transform: none; }
+.tile.have.off::after { background: rgba(255, 200, 97, 0.1); }
+.tile.have.off .mark { background: var(--amber); color: #3b2b00; transform: none; }
+.tile.have.off .mark .v { display: block; }
+.tile.have.off .mark .x { display: none; }
+.tile.have.off .have-tag { display: block; }
 
 .cta {
   display: flex;
@@ -906,3 +961,61 @@ button.pill-icon:hover { background: var(--surface-2); color: var(--text); }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
 }
+
+/* ---------- Phones ----------
+   The window is the whole screen, so the oval stands upright and the layout
+   uses the phone's width instead of the scaled 672px circle. */
+
+html.mobile body {
+  background:
+    radial-gradient(90% 60% at 50% 30%, rgba(61, 220, 151, 0.10), transparent 70%),
+    linear-gradient(180deg, var(--bg-2), var(--bg-3));
+}
+html.mobile .oval {
+  inset: calc(env(safe-area-inset-top) + 8px) 8px calc(env(safe-area-inset-bottom) + 8px);
+  border-radius: 50% / 16%;
+}
+html.mobile .stage {
+  inset: 0;
+  left: 0;
+  top: 0;
+  width: auto;
+  height: auto;
+  transform: none;
+}
+html.mobile .dot,
+html.mobile .grip,
+html.mobile #folder-change { display: none; }
+html.mobile .split .chip { padding-right: 14px; }
+html.mobile .bar { top: 30px; }
+html.mobile .tabs { top: 70px; width: min(300px, calc(100% - 56px)); }
+html.mobile .view { padding-top: 124px; }
+html.mobile .pill { width: calc(100% - 32px); height: 52px; }
+html.mobile .go { width: 40px; height: 40px; }
+html.mobile .queue,
+html.mobile .grid-wrap {
+  flex: 1;
+  height: auto;
+  min-height: 0;
+  margin-bottom: 116px;
+}
+html.mobile .queue { width: calc(100% - 20px); }
+html.mobile .item { height: 58px; gap: 10px; padding: 0 6px 0 7px; }
+html.mobile .ring { width: 42px; height: 42px; }
+html.mobile .title { font-size: 13px; }
+html.mobile .meta { font-size: 11px; }
+html.mobile .act { width: 32px; height: 32px; }
+html.mobile .foot { bottom: 56px; gap: 8px; }
+html.mobile .ctools { width: calc(100% - 28px); flex-wrap: wrap; justify-content: center; gap: 8px; }
+html.mobile .ctools .csearch { order: -1; width: 100%; }
+html.mobile .grid-wrap { width: calc(100% - 12px); }
+html.mobile .grid { padding: 8px 12px 30px; gap: 10px; }
+html.mobile .tile { width: calc((100% - 10px) / 2); border-radius: 12px; }
+html.mobile .cta { padding: 0 16px 0 13px; }
+html.mobile .toast { bottom: 112px; max-width: calc(100% - 48px); }
+
+/* ---------- Website demo ---------- */
+html.web .dot,
+html.web .grip,
+html.web #folder-change { display: none; }
+html.web .split .chip { padding-right: 14px; }

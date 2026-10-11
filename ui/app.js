@@ -29,6 +29,7 @@ const ICON = {
 
 const DESIGN = 672; // diameter the stage is laid out on
 const DEFAULT_SIZE = 700;
+let MOBILE = false; // phones get an upright, full-screen oval instead
 
 /* ---------- Formatting ---------- */
 
@@ -193,13 +194,16 @@ function openQualityMenu(chip) {
       `<svg class="tick" viewBox="0 0 24 24"><path d="M5.5 12.5l4 4 9-9"/></svg></button>`).join("");
   menu.hidden = false;
   // The stage is scaled, so convert screen pixels back to stage pixels.
-  const st = $("#stage").getBoundingClientRect();
-  const s = st.width / DESIGN;
+  const stage = $("#stage");
+  const st = stage.getBoundingClientRect();
+  const s = parseFloat(getComputedStyle(stage).getPropertyValue("--s")) || 1;
+  const width = st.width / s, height = st.height / s;
+  const margin = MOBILE ? 16 : 110; // keep clear of the oval's curved edge
   const r = chip.getBoundingClientRect();
   const mw = menu.offsetWidth, mh = menu.offsetHeight;
   const cx = (r.left + r.width / 2 - st.left) / s;
-  const left = Math.min(Math.max(cx - mw / 2, 110), DESIGN - mw - 110);
-  const above = (r.top - st.top) / s > DESIGN / 2;
+  const left = Math.min(Math.max(cx - mw / 2, margin), width - mw - margin);
+  const above = (r.top - st.top) / s > height / 2;
   menu.style.left = `${left}px`;
   menu.style.top = above ? `${(r.top - st.top) / s - mh - 8}px` : `${(r.bottom - st.top) / s + 8}px`;
   menu.style.setProperty("--origin", above ? "bottom center" : "top center");
@@ -233,6 +237,7 @@ async function changeFolder() {
 
 /** Scales the 672px design to whatever oval the window currently is. */
 function fitStage() {
+  if (MOBILE) return $("#stage").style.setProperty("--s", "1");
   const oval = $("#oval");
   const s = Math.min(oval.clientWidth, oval.clientHeight) / DESIGN;
   $("#stage").style.setProperty("--s", s.toFixed(4));
@@ -241,11 +246,13 @@ function fitStage() {
 let saveSizeTimer;
 function onResize() {
   fitStage();
+  if (MOBILE) return;
   clearTimeout(saveSizeTimer);
   saveSizeTimer = setTimeout(() => store.set("size", `${innerWidth}x${innerHeight}`), 400);
 }
 
 async function restoreSize() {
+  if (MOBILE) return;
   const m = /^(\d+)x(\d+)$/.exec(store.get("size", ""));
   if (m && (+m[1] !== innerWidth || +m[2] !== innerHeight)) {
     await appWindow.setSize(new LogicalSize(+m[1], +m[2])).catch(() => {});
@@ -342,7 +349,9 @@ function renderJob(j) {
       invoke("cancel", { id: j.id });
     });
     el.addEventListener("click", () => {
-      if (jobs.get(j.id)?.data.status === "done") invoke("reveal", { id: j.id });
+      if (jobs.get(j.id)?.data.status !== "done") return;
+      if (MOBILE) toast("Guardado en Descargas/Oval");
+      else invoke("reveal", { id: j.id });
     });
     $(j.live ? "#live-queue" : "#queue").appendChild(el);
     entry = { data: j, el, icon: null };
@@ -437,14 +446,20 @@ async function suggestFromClipboard() {
 
 /* ---------- Channel ---------- */
 
-const channel = { token: 0, entries: [], off: new Set(), name: null, last: null, loading: false };
+const channel = { token: 0, entries: [], off: new Set(), have: new Set(), name: null, last: null, loading: false, query: "" };
+
+/** Lowercase without accents, so "camion" finds "Camión". */
+const fold = (s) => String(s).normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+const matches = (entry) => !channel.query || fold(entry.title).includes(channel.query);
 
 function renderCount() {
   const total = channel.entries.length;
   const sel = total - channel.off.size;
-  $("#ccount").innerHTML = total
-    ? `<b>${sel}</b> de ${total}${channel.loading ? " · cargando…" : ""}`
-    : channel.loading ? "Buscando vídeos…" : "";
+  const shown = channel.query ? channel.entries.filter(matches).length : total;
+  $("#ccount").innerHTML = !total
+    ? channel.loading ? "…" : ""
+    : channel.query ? `${shown} de ${total}` : `<b>${sel}</b>/${total}`;
+  $("#csearch").placeholder = channel.loading ? "Buscando vídeos…" : "Buscar en el canal";
   $("#csel").textContent = sel;
   $("#cdownload").disabled = sel === 0;
 }
@@ -468,7 +483,10 @@ function tileFor(entry, i) {
     `<span class="shade"></span>` +
     (entry.duration ? `<span class="dur">${stamp(entry.duration)}</span>` : "") +
     `<span class="mark"><span class="v">${ICON.check}</span><span class="x">${ICON.x}</span></span>` +
+    `<span class="have-tag">Ya descargado</span>` +
     `<span class="t">${esc(entry.title)}</span>`;
+  if (channel.have.has(entry.id)) t.classList.add("have", "off");
+  if (!matches(entry)) t.hidden = true;
   // Some sites block hotlinked thumbnails: fall back to the placeholder.
   $("img", t)?.addEventListener("error", () => {
     t.classList.add("noimg");
@@ -491,8 +509,10 @@ async function loadChannel() {
   }
   syncChannelTools();
   const token = ++channel.token;
-  Object.assign(channel, { entries: [], off: new Set(), name: null, last: null, loading: true });
+  Object.assign(channel, { entries: [], off: new Set(), have: new Set(), name: null, last: null, loading: true, query: "" });
+  $("#csearch").value = "";
   $("#grid").innerHTML = "";
+  $("#grid").classList.remove("settled");
   $(".grid-wrap").classList.remove("filled");
   $("#channel-go").classList.add("busy");
   renderCount();
@@ -505,6 +525,7 @@ async function loadChannel() {
     if (summary.token !== channel.token) return;
     channel.name = summary.channel || channel.name;
     if (!summary.count) toast("No se encontraron vídeos", true);
+    else await markDownloaded();
   } catch (err) {
     if (token !== channel.token || err === "cancelled") return;
     toast(String(err), true);
@@ -515,6 +536,31 @@ async function loadChannel() {
       renderCount();
     }
   }
+}
+
+/** Videos already in the folder turn yellow and are left out by default. */
+async function markDownloaded() {
+  const ids = new Set(await invoke("downloaded_ids", { folder: channel.name }).catch(() => []));
+  let found = 0;
+  channel.entries.forEach((e, i) => {
+    if (!ids.has(e.id)) return;
+    channel.have.add(e.id);
+    channel.off.add(i);
+    $(`.tile[data-i="${i}"]`)?.classList.add("have", "off");
+    found++;
+  });
+  if (found) toast(`${found} ${found === 1 ? "ya está descargado" : "ya están descargados"} (en amarillo)`);
+  renderCount();
+}
+
+function applyFilter() {
+  $("#grid").classList.add("settled");
+  channel.query = fold($("#csearch").value.trim());
+  channel.entries.forEach((e, i) => {
+    const tile = $(`.tile[data-i="${i}"]`);
+    if (tile) tile.hidden = !matches(e);
+  });
+  renderCount();
 }
 
 function onBatch({ token, channel: name, entries }) {
@@ -609,7 +655,10 @@ function wire() {
     input.focus();
   });
 
-  $("#folder").addEventListener("click", () => invoke("reveal", { id: null }));
+  $("#folder").addEventListener("click", () => {
+    if (MOBILE) toast("Las descargas están en Descargas/Oval");
+    else invoke("reveal", { id: null });
+  });
   $("#folder-change").addEventListener("click", changeFolder);
 
   $$(".qchip").forEach((c) => c.addEventListener("click", (e) => { e.stopPropagation(); openQualityMenu(c); }));
@@ -656,15 +705,22 @@ function wire() {
     channel.last = i;
     renderCount();
   });
+  // "Todos" / "Ninguno" act on what the search shows.
   $("#all").addEventListener("click", () => {
-    channel.off.clear();
-    $$(".tile.off").forEach((t) => t.classList.remove("off"));
+    channel.entries.forEach((e, i) => matches(e) && setOff(i, false));
     renderCount();
   });
   $("#none").addEventListener("click", () => {
-    channel.entries.forEach((_, i) => channel.off.add(i));
-    $$(".tile").forEach((t) => t.classList.add("off"));
+    channel.entries.forEach((e, i) => matches(e) && setOff(i, true));
     renderCount();
+  });
+  $("#csearch").addEventListener("input", applyFilter);
+  $("#csearch").addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && e.target.value) {
+      e.stopPropagation();
+      e.target.value = "";
+      applyFilter();
+    }
   });
   $("#cdownload").addEventListener("click", downloadSelection);
 
@@ -685,12 +741,19 @@ function wire() {
   });
 
   window.addEventListener("focus", suggestFromClipboard);
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) suggestFromClipboard();
+  });
   document.addEventListener("contextmenu", (e) => {
     if (!(e.target instanceof HTMLInputElement)) e.preventDefault();
   });
 }
 
 async function main() {
+  const os = await invoke("platform").catch(() => "");
+  MOBILE = os === "android";
+  document.documentElement.classList.toggle("mobile", MOBILE);
+  document.documentElement.classList.toggle("web", os === "web"); // demo on the website
   fitStage();
   setMode(mode);
   setTab(store.get("tab", "link"));

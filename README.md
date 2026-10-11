@@ -7,7 +7,12 @@
 <p align="center">
   Un descargador de vídeos minimalista, redondo y rápido.<br>
   Pega un enlace, pulsa descargar. Nada más.<br>
-  Vídeos sueltos, canales enteros y directos en tiempo real, en Windows y Linux.
+  Vídeos sueltos, canales enteros y directos en tiempo real, en Windows, Linux y Android.
+</p>
+
+<p align="center">
+  <a href="https://xxkuroikenshixx.github.io/Oval/"><b>Página web y demo</b></a> ·
+  <a href="https://github.com/xXKuroiKenshiXx/Oval/releases/latest"><b>Descargar</b></a>
 </p>
 
 <p align="center">
@@ -27,7 +32,8 @@ Tres pestañas, una para cada caso:
   [cualquiera de los más de mil sitios compatibles](https://github.com/yt-dlp/yt-dlp/blob/master/supportedsites.md).
 - **Canal**: una cuenta entera (canal de YouTube, perfil de TikTok, playlist…). Aparecen todas las
   miniaturas; toca las que **no** quieras y se marcan en rojo. `Shift` + clic marca un rango.
-  En YouTube eliges entre Vídeos, Shorts y Directos.
+  Busca por título dentro del canal, y lo que ya tienes descargado sale **en amarillo** (y queda
+  fuera salvo que lo toques). En YouTube eliges entre Vídeos, Shorts y Directos.
 - **Directo**: graba en tiempo real un directo de Twitch, Kick, YouTube, TikTok y otros. Detén
   cuando quieras y queda guardado en MP4. Si se corta la conexión, lo grabado no se pierde.
 
@@ -44,7 +50,9 @@ Y además:
 - **Ventana ovalada sin bordes** que puedes redimensionar desde el tirador de abajo a la derecha
   (doble clic en el nombre para volver al tamaño original). Fuera del óvalo los clics pasan a lo
   que haya detrás.
-- **Windows y Linux**.
+- **Windows, Linux y Android**.
+- **Resistente a los bloqueos de YouTube**: si YouTube pide "confirmar que no eres un bot", Oval
+  cambia solo a otros reproductores de YouTube durante un rato y reintenta, sin pedirte sesión.
 
 Si pegas un canal o un directo en la pestaña Enlace, Oval lo lleva solo a la pestaña correcta.
 
@@ -56,8 +64,11 @@ Ve a [Releases](https://github.com/xXKuroiKenshiXx/Oval/releases):
 | --- | --- |
 | Windows 10/11 | `Oval_x.y.z_x64-setup.exe` (instalador) o `Oval-x.y.z-portable.exe` |
 | Linux | `Oval_x.y.z_amd64.AppImage` o `Oval_x.y.z_amd64.deb` |
+| Android 7+ | `Oval_x.y.z_android.apk` (permite instalar apps de fuera de Play Store) |
 
 En Windows hace falta WebView2 (viene con Windows 11; el instalador lo añade si falta).
+En Android las descargas van a `Descargas/Oval`; los directos se guardan en `.ts`, que abre
+cualquier reproductor (VLC, MX Player…). Mantén la app abierta mientras descarga.
 En Linux, dale permiso de ejecución al AppImage (`chmod +x Oval_*.AppImage`). Para que el óvalo
 se vea transparente hace falta un escritorio con compositor (GNOME, KDE y la mayoría lo tienen).
 
@@ -83,6 +94,11 @@ Al abrir Oval, si tienes un enlace copiado aparece ya en la caja.
 
 Oval puede bajar lo que puede bajar yt-dlp. Algunas cosas dependen de cada sitio:
 
+- **YouTube** limita por conexión: si descargas muchísimo seguido puede frenarte. Oval reintenta
+  con otros reproductores (los vídeos que no se pueden insertar en otras webs pueden quedar en
+  360p durante ese rato) y espera un poco entre peticiones. No hay forma de garantizar descargas
+  ilimitadas: el límite lo pone YouTube a tu IP.
+
 - Perfiles completos de **X/Twitter** e **Instagram** suelen pedir iniciar sesión, así que la
   pestaña Canal funciona mejor con YouTube, TikTok y playlists.
 - Los directos de **Instagram** no siempre están disponibles en yt-dlp.
@@ -96,7 +112,13 @@ Oval está hecho en Rust con [Tauri 2](https://tauri.app). Las descargas las hac
 En el primer arranque Oval baja ambos a su carpeta de datos (`%LOCALAPPDATA%\Oval\bin` en
 Windows, `~/.local/share/Oval/bin` en Linux). Si ya tienes FFmpeg instalado lo usa. yt-dlp se
 actualiza solo una vez al día, porque los sitios cambian a menudo y un motor viejo es la causa más
-común de fallos. Ninguno de los dos va incluido en el instalador.
+común de fallos. Ninguno de los dos va incluido en el instalador. Si el equipo no tiene Deno ni
+Node, Oval también baja [Deno](https://deno.com): yt-dlp lo necesita para resolver los desafíos de
+JavaScript de YouTube.
+
+En Android, yt-dlp, Python y FFmpeg van dentro de la app gracias a
+[youtubedl-android](https://github.com/JunkFood02/youtubedl-android), y QuickJS hace de motor de
+JavaScript.
 
 Los vídeos se guardan en H.264 + AAC dentro de MP4 siempre que exista esa versión (hasta 1080p en
 YouTube), así se abren en cualquier reproductor o editor. Por encima de 1080p se usa el códec que
@@ -129,6 +151,16 @@ cargo tauri build
 En Linux usa `cargo tauri build --bundles appimage,deb`. Los paquetes quedan en
 `target/release/bundle/`.
 
+Para Android hacen falta JDK 17, el SDK (plataforma 37) y el NDK 27; el proyecto ya está en
+`gen/android`:
+
+```bash
+cargo tauri android build --apk --target aarch64 armv7
+```
+
+Para firmar, crea `gen/android/keystore.properties` (`storeFile`, `storePassword`, `keyAlias`,
+`keyPassword`); ese archivo no se sube al repositorio.
+
 ### Estructura
 
 ```
@@ -139,13 +171,19 @@ src/
   tools.rs       descarga y actualización de yt-dlp y FFmpeg
   settings.rs    ajustes (carpeta, simultáneas)
   platform.rs    clics a través del óvalo, procesos en Windows y Linux
+  engine.rs      ejecuta yt-dlp: proceso en escritorio, motor integrado en Android
+plugins/oval-engine/   puente con youtubedl-android (Kotlin)
+gen/android/     proyecto de Android
 ui/              HTML, CSS y JS de la interfaz, sin dependencias
+site/            página web (GitHub Pages) con la demo interactiva
 ```
 
 ### Publicar una versión
 
 Sube la versión en `Cargo.toml` y `tauri.conf.json`, anota los cambios en `CHANGELOG.md` y empuja
-una etiqueta `vX.Y.Z`. GitHub Actions compila Windows y Linux y publica todos los archivos.
+una etiqueta `vX.Y.Z`. GitHub Actions compila Windows, Linux y Android y publica todos los
+archivos. La APK solo se firma si el repositorio tiene los secretos `ANDROID_KEYSTORE_B64` y
+`ANDROID_KEYSTORE_PASSWORD`. La página web se publica sola en cada cambio de `site/` o `ui/`.
 
 ## Aviso
 

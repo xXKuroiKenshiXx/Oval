@@ -23,12 +23,17 @@ impl Default for Settings {
 
 pub struct Store(pub Mutex<Settings>);
 
-fn file() -> Option<PathBuf> {
-    Some(dirs::config_dir()?.join("Oval").join("settings.json"))
+fn file(app: &AppHandle) -> Option<PathBuf> {
+    #[cfg(desktop)]
+    let _ = app;
+    #[cfg(desktop)]
+    return Some(dirs::config_dir()?.join("Oval").join("settings.json"));
+    #[cfg(mobile)]
+    return Some(app.path().app_config_dir().ok()?.join("settings.json"));
 }
 
-pub fn load() -> Settings {
-    file()
+pub fn load(app: &AppHandle) -> Settings {
+    file(app)
         .and_then(|f| std::fs::read_to_string(f).ok())
         .and_then(|s| serde_json::from_str(&s).ok())
         .unwrap_or_default()
@@ -42,7 +47,7 @@ pub fn update(app: &AppHandle, f: impl FnOnce(&mut Settings)) -> Settings {
     let store = app.state::<Store>();
     let mut s = store.0.lock().unwrap();
     f(&mut s);
-    if let Some(path) = file() {
+    if let Some(path) = file(app) {
         if let Some(dir) = path.parent() {
             let _ = std::fs::create_dir_all(dir);
         }

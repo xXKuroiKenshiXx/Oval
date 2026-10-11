@@ -9,8 +9,9 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
 use futures_util::StreamExt;
-use serde::Serialize;
-use tauri::{AppHandle, Emitter};
+use tauri::AppHandle;
+
+use crate::engine::emit;
 use tokio::sync::Mutex;
 
 const YTDLP_API: &str = "https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest";
@@ -24,6 +25,9 @@ mod target {
     pub const FFMPEG_ARCHIVE: &str =
         "https://github.com/yt-dlp/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl-shared.zip";
     pub const FFMPEG: &str = "ffmpeg.exe";
+    pub const DENO_ARCHIVE: &str =
+        "https://github.com/denoland/deno/releases/latest/download/deno-x86_64-pc-windows-msvc.zip";
+    pub const DENO: &str = "deno.exe";
 }
 
 #[cfg(not(windows))]
@@ -34,6 +38,9 @@ mod target {
     pub const FFMPEG_ARCHIVE: &str =
         "https://github.com/yt-dlp/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linux64-gpl.tar.xz";
     pub const FFMPEG: &str = "ffmpeg";
+    pub const DENO_ARCHIVE: &str =
+        "https://github.com/denoland/deno/releases/latest/download/deno-x86_64-unknown-linux-gnu.zip";
+    pub const DENO: &str = "deno";
 }
 
 pub use target::FFMPEG;
@@ -43,6 +50,9 @@ pub struct Tools {
     pub ytdlp: PathBuf,
     /// `None` when ffmpeg is already reachable through PATH.
     pub ffmpeg_dir: Option<PathBuf>,
+    /// Deno fetched by Oval, when the system has none. yt-dlp needs a
+    /// JavaScript runtime to solve YouTube's player challenges.
+    pub deno: Option<PathBuf>,
 }
 
 impl Tools {
@@ -54,40 +64,12 @@ impl Tools {
     }
 }
 
-#[derive(Clone, Serialize)]
-pub struct EngineStatus {
-    pub ready: bool,
-    pub message: String,
-    pub progress: Option<f64>,
-}
-
 static TOOLS: Mutex<Option<Tools>> = Mutex::const_new(None);
-static LAST: std::sync::Mutex<Option<EngineStatus>> = std::sync::Mutex::new(None);
-
-/// The latest engine status, for a UI that subscribed after it was emitted.
-pub fn status() -> EngineStatus {
-    LAST.lock().unwrap().clone().unwrap_or(EngineStatus {
-        ready: false,
-        message: "Preparando motor".into(),
-        progress: None,
-    })
-}
-
 pub fn bin_dir() -> PathBuf {
     dirs::data_local_dir()
         .unwrap_or_else(std::env::temp_dir)
         .join("Oval")
         .join("bin")
-}
-
-fn emit(app: &AppHandle, ready: bool, message: &str, progress: Option<f64>) {
-    let status = EngineStatus {
-        ready,
-        message: message.into(),
-        progress,
-    };
-    *LAST.lock().unwrap() = Some(status.clone());
-    let _ = app.emit("engine", status);
 }
 
 fn find_ytdlp(home: &Path) -> Option<PathBuf> {
@@ -168,7 +150,12 @@ pub async fn ensure(app: &AppHandle) -> Result<Tools, String> {
         find_exe(&ffmpeg_home, FFMPEG).and_then(|p| p.parent().map(Path::to_path_buf))
     };
 
-    let tools = Tools { ytdlp, ffmpeg_dir };
+    let deno = find_exe(&dir.join("deno"), target::DENO);
+    let tools = Tools {
+        ytdlp,
+        ffmpeg_dir,
+        deno,
+    };
     *guard = Some(tools.clone());
     emit(app, true, "Listo", None);
     Ok(tools)
@@ -177,6 +164,7 @@ pub async fn ensure(app: &AppHandle) -> Result<Tools, String> {
 /// Refreshes the managed yt-dlp once a day. Sites change constantly and an old
 /// extractor is the most common reason a download fails.
 pub async fn update_in_background(app: AppHandle) {
+    ensure_js_runtime(&app).await;
     let dir = bin_dir();
     let stamp = dir.join("yt-dlp.version");
     let fresh = std::fs::metadata(&stamp)
@@ -222,6 +210,30 @@ pub async fn update_in_background(app: AppHandle) {
     }
     let _ = std::fs::remove_dir_all(&staging);
     emit(&app, guard.is_some(), "Listo", None);
+}
+
+/// Fetches Deno in the background if neither Deno nor Node is installed.
+/// Without a JavaScript runtime YouTube hides formats and blocks sooner.
+async fn ensure_js_runtime(app: &AppHandle) {
+    let node = if cfg!(windows) { "node.exe" } else { "node" };
+    if which(target::DENO).is_some() || which(node).is_some() {
+        return;
+    }
+    let home = bin_dir().join("deno");
+    if find_exe(&home, target::DENO).is_none() {
+        let keep = |name: &str| name.rsplit('/').next() == Some(target::DENO);
+        if install(app, target::DENO_ARCHIVE, &home, keep, "Preparando motor")
+            .await
+            .is_err()
+        {
+            return;
+        }
+    }
+    let mut guard = TOOLS.lock().await;
+    if let (Some(t), Some(p)) = (guard.as_mut(), find_exe(&home, target::DENO)) {
+        t.deno = Some(p);
+    }
+    emit(app, guard.is_some(), "Listo", None);
 }
 
 async fn latest_tag() -> Result<String, String> {

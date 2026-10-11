@@ -8,6 +8,10 @@ repository = "https://github.com/xXKuroiKenshiXx/Oval"
 edition = "2021"
 rust-version = "1.80"
 
+[lib]
+name = "oval_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
@@ -16,14 +20,21 @@ tauri = { version = "2", features = [] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["process", "io-util", "sync", "time", "fs", "macros"] }
+dirs = "6"
+tauri-plugin-clipboard-manager = "2"
+
+# Desktop: yt-dlp and FFmpeg are fetched and run as child processes.
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream", "json"] }
 futures-util = "0.3"
 zip = { version = "2", default-features = false, features = ["deflate"] }
-dirs = "6"
-arboard = { version = "3", default-features = false }
 tauri-plugin-dialog = "2"
 
-[target.'cfg(unix)'.dependencies]
+# Android: yt-dlp runs inside the app through this plugin.
+[target.'cfg(target_os = "android")'.dependencies]
+tauri-plugin-oval-engine = { path = "plugins/oval-engine" }
+
+[target.'cfg(all(unix, not(target_os = "android")))'.dependencies]
 libc = "0.2"
 tar = "0.4"
 lzma-rs = "0.3"
