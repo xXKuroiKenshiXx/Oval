@@ -124,7 +124,13 @@ jobs:
         run: |
           version="${GITHUB_REF_NAME#v}"
           notes=$(awk -v v="$version" 'index($0, "## [" v "]") == 1 {f=1; next} /^## / {f=0} f' CHANGELOG.md)
-          gh release create "$GITHUB_REF_NAME" \
-            --title "Oval ${version}" \
-            --notes "${notes:-Oval ${version}}" \
-            dist/*
+          # A release may already exist (published by hand with a signed APK);
+          # then just add or refresh the files built here.
+          if gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" dist/* --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" \
+              --title "Oval ${version}" \
+              --notes "${notes:-Oval ${version}}" \
+              dist/*
+          fi
