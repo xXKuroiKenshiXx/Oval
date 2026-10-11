@@ -446,11 +446,13 @@ async function suggestFromClipboard() {
 
 /* ---------- Channel ---------- */
 
-const channel = { token: 0, entries: [], off: new Set(), have: new Set(), name: null, last: null, loading: false, query: "" };
+const channel = { token: 0, entries: [], off: new Set(), have: new Set(), disk: null, diskAsked: false, name: null, last: null, loading: false, query: "" };
 
 /** Lowercase without accents, so "camion" finds "Camión". */
 const fold = (s) => String(s).normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
 const matches = (entry) => !channel.query || fold(entry.title).includes(channel.query);
+/** Letters and digits only: file names lose characters like "/" or "?" on the way. */
+const titleKey = (s) => fold(s).replace(/[^\p{L}\p{N}]+/gu, "");
 
 function renderCount() {
   const total = channel.entries.length;
@@ -485,7 +487,6 @@ function tileFor(entry, i) {
     `<span class="mark"><span class="v">${ICON.check}</span><span class="x">${ICON.x}</span></span>` +
     `<span class="have-tag">Ya descargado</span>` +
     `<span class="t">${esc(entry.title)}</span>`;
-  if (channel.have.has(entry.id)) t.classList.add("have", "off");
   if (!matches(entry)) t.hidden = true;
   // Some sites block hotlinked thumbnails: fall back to the placeholder.
   $("img", t)?.addEventListener("error", () => {
@@ -509,7 +510,7 @@ async function loadChannel() {
   }
   syncChannelTools();
   const token = ++channel.token;
-  Object.assign(channel, { entries: [], off: new Set(), have: new Set(), name: null, last: null, loading: true, query: "" });
+  Object.assign(channel, { entries: [], off: new Set(), have: new Set(), disk: null, diskAsked: false, name: null, last: null, loading: true, query: "" });
   $("#csearch").value = "";
   $("#grid").innerHTML = "";
   $("#grid").classList.remove("settled");
@@ -525,7 +526,7 @@ async function loadChannel() {
     if (summary.token !== channel.token) return;
     channel.name = summary.channel || channel.name;
     if (!summary.count) toast("No se encontraron vídeos", true);
-    else await markDownloaded();
+    else await markDownloaded(true);
   } catch (err) {
     if (token !== channel.token || err === "cancelled") return;
     toast(String(err), true);
@@ -538,19 +539,73 @@ async function loadChannel() {
   }
 }
 
-/** Videos already in the folder turn yellow and are left out by default. */
-async function markDownloaded() {
-  const ids = new Set(await invoke("downloaded_ids", { folder: channel.name }).catch(() => []));
-  let found = 0;
-  channel.entries.forEach((e, i) => {
-    if (!ids.has(e.id)) return;
-    channel.have.add(e.id);
+/** What the download folder already holds, read fresh from disk. */
+async function readDisk() {
+  const d = await invoke("on_disk", { folder: channel.name }).catch(() => null);
+  if (!d) return null;
+  const names = d.names.map(titleKey).filter(Boolean);
+  return { ids: new Set(d.ids), partial: new Set(d.partial), exact: new Set(names), long: names.filter((k) => k.length >= 24) };
+}
+
+/** "have" when the video is in the folder, "partial" when it was cut halfway. */
+function diskState(entry) {
+  const d = channel.disk;
+  if (!d) return null;
+  if (d.ids.has(entry.id)) return "have";
+  const key = titleKey(entry.title);
+  // Files named by title only (other apps, older downloads); long titles get cut in file names.
+  if (key && (d.exact.has(key) || d.long.some((k) => key.startsWith(k)))) return "have";
+  return d.partial.has(entry.id) ? "partial" : null;
+}
+
+/** Yellow tiles are already downloaded and left out; half-done ones stay selected and resume. */
+function applyDisk(i) {
+  const entry = channel.entries[i];
+  const state = diskState(entry);
+  const tile = $(`.tile[data-i="${i}"]`);
+  if (state === "have" && !channel.have.has(i)) {
+    channel.have.add(i);
     channel.off.add(i);
-    $(`.tile[data-i="${i}"]`)?.classList.add("have", "off");
-    found++;
+    tile?.classList.remove("partial");
+    tile?.classList.add("have", "off");
+    if (tile) $(".have-tag", tile).textContent = "Ya descargado";
+    return "have";
+  }
+  if (state === "partial" && !channel.have.has(i)) {
+    tile?.classList.add("partial");
+    if (tile) $(".have-tag", tile).textContent = "A medias · se continúa";
+    return "partial";
+  }
+  return null;
+}
+
+async function markDownloaded(announce = false) {
+  const token = channel.token;
+  const disk = await readDisk();
+  if (!disk || token !== channel.token) return;
+  channel.disk = disk;
+  let have = 0;
+  let partial = 0;
+  channel.entries.forEach((_, i) => {
+    applyDisk(i);
+    if (channel.have.has(i)) have++;
+    else if (diskState(channel.entries[i]) === "partial") partial++;
   });
-  if (found) toast(`${found} ${found === 1 ? "ya está descargado" : "ya están descargados"} (en amarillo)`);
+  if (announce && (have || partial)) {
+    const parts = [];
+    if (have) parts.push(`${have} ${have === 1 ? "ya está descargado" : "ya están descargados"} (en amarillo)`);
+    if (partial) parts.push(`${partial} a medias, se continúan`);
+    toast(parts.join(" · "));
+  }
   renderCount();
+}
+
+/** A download just finished: if its video is on the grid, it turns yellow. */
+let diskRefresh = 0;
+function refreshDiskSoon() {
+  if (!channel.entries.length || channel.loading) return;
+  clearTimeout(diskRefresh);
+  diskRefresh = setTimeout(() => markDownloaded(), 600);
 }
 
 function applyFilter() {
@@ -567,11 +622,23 @@ function onBatch({ token, channel: name, entries }) {
   if (token !== channel.token) return;
   if (name) channel.name = name;
   const frag = document.createDocumentFragment();
+  const first = channel.entries.length;
   for (const e of entries) {
     const i = channel.entries.push(e) - 1;
     frag.appendChild(tileFor(e, i));
   }
   $("#grid").appendChild(frag);
+  // Mark as the list streams in, not only when it ends.
+  if (channel.disk) for (let i = first; i < channel.entries.length; i++) applyDisk(i);
+  else if (channel.name && !channel.diskAsked) {
+    channel.diskAsked = true;
+    readDisk().then((d) => {
+      if (!d || token !== channel.token || channel.disk) return;
+      channel.disk = d;
+      channel.entries.forEach((_, i) => applyDisk(i));
+      renderCount();
+    });
+  }
   $(".grid-wrap").classList.add("filled");
   renderCount();
 }
@@ -707,7 +774,8 @@ function wire() {
   });
   // "Todos" / "Ninguno" act on what the search shows.
   $("#all").addEventListener("click", () => {
-    channel.entries.forEach((e, i) => matches(e) && setOff(i, false));
+    // Already-downloaded videos stay out; tap one to get it again.
+    channel.entries.forEach((e, i) => matches(e) && !channel.have.has(i) && setOff(i, false));
     renderCount();
   });
   $("#none").addEventListener("click", () => {
@@ -760,7 +828,11 @@ async function main() {
   wire();
   restoreSize();
 
-  await listen("job", (e) => renderJob(e.payload));
+  await listen("job", (e) => {
+    const was = jobs.get(e.payload.id)?.data.status;
+    renderJob(e.payload);
+    if (e.payload.status === "done" && was && was !== "done") refreshDiskSoon();
+  });
   await listen("job-removed", (e) => removeJob(e.payload));
   await listen("engine", (e) => { engine = e.payload; renderEngine(); });
   await listen("channel-batch", (e) => onBatch(e.payload));

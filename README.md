@@ -32,8 +32,10 @@ Tres pestañas, una para cada caso:
   [cualquiera de los más de mil sitios compatibles](https://github.com/yt-dlp/yt-dlp/blob/master/supportedsites.md).
 - **Canal**: una cuenta entera (canal de YouTube, perfil de TikTok, playlist…). Aparecen todas las
   miniaturas; toca las que **no** quieras y se marcan en rojo. `Shift` + clic marca un rango.
-  Busca por título dentro del canal, y lo que ya tienes descargado sale **en amarillo** (y queda
-  fuera salvo que lo toques). En YouTube eliges entre Vídeos, Shorts y Directos.
+  Busca por título dentro del canal, y lo que ya tienes en la carpeta sale **en amarillo** (y queda
+  fuera salvo que lo toques), aunque lo hayas bajado en otra sesión. Lo que quedó a medias porque
+  se cortó o cerraste la app sale con borde punteado y sigue desde donde iba. En YouTube eliges
+  entre Vídeos, Shorts y Directos.
 - **Directo**: graba en tiempo real un directo de Twitch, Kick, YouTube, TikTok y otros. Detén
   cuando quieras y queda guardado en MP4. Si se corta la conexión, lo grabado no se pierde.
 

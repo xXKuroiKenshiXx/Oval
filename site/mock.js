@@ -189,8 +189,8 @@
       }
     },
     cancel_listing: () => null,
-    // A couple of the sample videos count as already downloaded.
-    downloaded_ids: () => ["demo2", "demo7"],
+    // A couple of the sample videos count as already downloaded, one as cut halfway.
+    on_disk: () => ({ ids: ["demo2", "demo7"], partial: ["demo11"], names: [] }),
     list_channel: async ({ token }) => {
       const count = 18;
       for (let b = 0; b < 3; b++) {

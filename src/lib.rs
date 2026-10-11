@@ -140,8 +140,8 @@ fn clipboard_text(app: AppHandle) -> Option<String> {
 }
 
 #[tauri::command]
-fn downloaded_ids(app: AppHandle, folder: Option<String>) -> Vec<String> {
-    downloads::downloaded_ids(&app, folder.as_deref())
+fn on_disk(app: AppHandle, folder: Option<String>) -> downloads::OnDisk {
+    downloads::on_disk(&app, folder.as_deref())
 }
 
 #[tauri::command]
@@ -226,7 +226,7 @@ pub fn run() {
             cancel_listing,
             clipboard_text,
             engine_status,
-            downloaded_ids,
+            on_disk,
             platform,
             download_folder,
             choose_folder,

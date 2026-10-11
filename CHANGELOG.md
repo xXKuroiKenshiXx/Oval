@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+### Added
+- Canal: los vídeos que quedaron a medias (descarga cortada o app cerrada) se marcan con borde
+  punteado amarillo y siguen desde donde iban.
+- Canal: los archivos sin `[id]` en el nombre también cuentan como descargados si el título coincide.
+
+### Changed
+- Canal: las miniaturas ya descargadas se marcan en amarillo mientras carga la lista, y al terminar
+  una descarga su miniatura pasa a amarillo.
+- Canal: «Todos» ya no vuelve a seleccionar lo que ya está descargado.
+
 ## [0.1.0] - 2026-10-10
 
 ### Added

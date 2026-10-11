@@ -820,6 +820,19 @@ button.pill-icon:hover { background: var(--surface-2); color: var(--text); }
 .tile.have.off .mark .v { display: block; }
 .tile.have.off .mark .x { display: none; }
 .tile.have.off .have-tag { display: block; }
+/* Tapped back in: a thin yellow ring still says it is on disk. */
+.tile.have:not(.off) { box-shadow: 0 0 0 1.5px var(--amber), 0 6px 16px -8px var(--shadow); }
+/* Cut halfway: stays selected and yt-dlp picks up where it stopped. */
+.tile.partial { outline: 2px dashed var(--amber); outline-offset: -2px; }
+.tile.partial .have-tag {
+  display: block;
+  top: auto;
+  bottom: 30%;
+  color: var(--amber);
+  background: rgba(20, 16, 4, 0.78);
+  box-shadow: inset 0 0 0 1px var(--amber);
+}
+.tile.partial.off .have-tag { display: none; }
 
 .cta {
   display: flex;

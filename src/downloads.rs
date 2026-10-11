@@ -826,46 +826,92 @@ fn short_url(url: &str) -> String {
     s.chars().take(60).collect()
 }
 
-/// IDs of videos already on disk: Oval names files "Title [id].ext", so the
-/// download folder (and the channel's subfolder) tells what is there.
-pub fn downloaded_ids(app: &AppHandle, folder: Option<&str>) -> Vec<String> {
+/// What is already in the download folder (and the channel's subfolder).
+#[derive(Debug, Default, Serialize)]
+pub struct OnDisk {
+    /// Finished files: Oval names them "Title [id].ext".
+    pub ids: Vec<String>,
+    /// Downloads cut halfway (".part" files): yt-dlp continues them.
+    pub partial: Vec<String>,
+    /// Media files without an id, matched by title instead.
+    pub names: Vec<String>,
+}
+
+pub fn on_disk(app: &AppHandle, folder: Option<&str>) -> OnDisk {
     let root = download_root(app);
     let mut dirs = vec![root.clone()];
     if let Some(f) = folder.map(sanitize).filter(|f| !f.is_empty()) {
         dirs.push(root.join(f));
     }
-    let mut ids = Vec::new();
+    let mut found = OnDisk::default();
     for dir in dirs {
         let Ok(entries) = std::fs::read_dir(&dir) else {
             continue;
         };
         for e in entries.flatten() {
             let name = e.file_name().to_string_lossy().into_owned();
-            if let Some(id) = id_from_filename(&name) {
-                ids.push(id.to_string());
+            match classify(&name) {
+                Some(File::Done(id)) => found.ids.push(id.to_string()),
+                Some(File::Partial(id)) => found.partial.push(id.to_string()),
+                Some(File::Named(title)) => found.names.push(title.to_string()),
+                None => {}
             }
         }
     }
-    ids.sort();
-    ids.dedup();
-    ids
+    for list in [&mut found.ids, &mut found.partial, &mut found.names] {
+        list.sort();
+        list.dedup();
+    }
+    found
 }
 
-fn id_from_filename(name: &str) -> Option<&str> {
-    const MEDIA: &[&str] = &[
-        "mp4", "mkv", "webm", "mp3", "m4a", "opus", "avi", "mov", "ts",
-    ];
-    let (stem, ext) = name.rsplit_once('.')?;
-    if !MEDIA.contains(&ext.to_ascii_lowercase().as_str()) {
-        return None;
+#[derive(Debug, PartialEq)]
+enum File<'a> {
+    Done(&'a str),
+    Partial(&'a str),
+    Named(&'a str),
+}
+
+const MEDIA: &[&str] = &[
+    "mp4", "mkv", "webm", "mp3", "m4a", "opus", "avi", "mov", "ts", "flv",
+];
+
+fn is_media(ext: &str) -> bool {
+    MEDIA.contains(&ext.to_ascii_lowercase().as_str())
+}
+
+/// "Title [id].mp4" is done; "Title [id].f137.mp4.part", "Title [id].mp4.ytdl"
+/// or a lone "Title [id].f251.webm" stream is a download left halfway.
+fn classify(name: &str) -> Option<File<'_>> {
+    let bracket = name.rfind('[').and_then(|open| {
+        let close = open + name[open..].find(']')?;
+        let id = &name[open + 1..close];
+        let valid = !id.is_empty()
+            && id
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
+        valid.then_some((id, &name[close + 1..]))
+    });
+    if let Some((id, rest)) = bracket {
+        let exts: Vec<&str> = rest.strip_prefix('.')?.split('.').collect();
+        return match exts.as_slice() {
+            [ext] if is_media(ext) => Some(File::Done(id)),
+            [.., "part" | "ytdl"] => Some(File::Partial(id)),
+            [stream, ext]
+                if is_media(ext)
+                    && (*stream == "temp"
+                        || stream.strip_prefix('f').is_some_and(|n| {
+                            !n.is_empty()
+                                && n.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+                        })) =>
+            {
+                Some(File::Partial(id))
+            }
+            _ => None,
+        };
     }
-    let inner = stem.strip_suffix(']')?;
-    let (_, id) = inner.rsplit_once('[')?;
-    (!id.is_empty()
-        && id
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'))
-    .then_some(id)
+    let (stem, ext) = name.rsplit_once('.')?;
+    (is_media(ext) && !stem.trim().is_empty()).then_some(File::Named(stem.trim()))
 }
 
 pub fn sanitize(name: &str) -> String {
@@ -910,14 +956,22 @@ mod tests {
     }
 
     #[test]
-    fn ids_come_from_file_names() {
+    fn files_on_disk_are_classified() {
         assert_eq!(
-            id_from_filename("Coffee Run [PVGeM40dABA].mp4"),
-            Some("PVGeM40dABA")
+            classify("Coffee Run [PVGeM40dABA].mp4"),
+            Some(File::Done("PVGeM40dABA"))
         );
-        assert_eq!(id_from_filename("a [b] c [x_y-1].mp3"), Some("x_y-1"));
-        assert_eq!(id_from_filename("notes [abc].txt"), None);
-        assert_eq!(id_from_filename("clip.mp4"), None);
+        assert_eq!(classify("a [b] c [x_y-1].mp3"), Some(File::Done("x_y-1")));
+        assert_eq!(
+            classify("Clip [abc].f137.mp4.part"),
+            Some(File::Partial("abc"))
+        );
+        assert_eq!(classify("Clip [abc].mp4.ytdl"), Some(File::Partial("abc")));
+        assert_eq!(classify("Clip [abc].f251.webm"), Some(File::Partial("abc")));
+        assert_eq!(classify("Clip [abc].webp"), None);
+        assert_eq!(classify("notes [abc].txt"), None);
+        assert_eq!(classify("Old clip.mp4"), Some(File::Named("Old clip")));
+        assert_eq!(classify("cover.jpg"), None);
         assert!(is_youtube("https://youtu.be/x") && !is_youtube("https://vimeo.com/1"));
     }
 
