@@ -73,7 +73,8 @@ jobs:
           java-version: 17
       - name: Android SDK
         run: |
-          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install             "platforms;android-37" "build-tools;35.0.0" "ndk;27.2.12479018" > /dev/null
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install \
+            "platforms;android-37" "build-tools;35.0.0" "ndk;27.2.12479018" > /dev/null || true
           echo "NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -87,11 +88,12 @@ jobs:
         if: env.KEYSTORE_B64 != ''
         run: |
           echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/oval.jks"
-          printf 'storeFile=%s
-storePassword=%s
-keyAlias=oval
-keyPassword=%s
-'             "$RUNNER_TEMP/oval.jks" "$KEYSTORE_PASSWORD" "$KEYSTORE_PASSWORD" > gen/android/keystore.properties
+          {
+            echo "storeFile=$RUNNER_TEMP/oval.jks"
+            echo "storePassword=$KEYSTORE_PASSWORD"
+            echo "keyAlias=oval"
+            echo "keyPassword=$KEYSTORE_PASSWORD"
+          } > gen/android/keystore.properties
       - name: Build
         if: env.KEYSTORE_B64 != ''
         run: npx --yes @tauri-apps/cli@2 android build --apk --target aarch64 armv7
@@ -99,7 +101,8 @@ keyPassword=%s
         if: env.KEYSTORE_B64 != ''
         run: |
           mkdir dist
-          cp gen/android/app/build/outputs/apk/universal/release/app-universal-release.apk             "dist/Oval_${GITHUB_REF_NAME#v}_android.apk"
+          cp gen/android/app/build/outputs/apk/universal/release/app-universal-release.apk \
+            "dist/Oval_${GITHUB_REF_NAME#v}_android.apk"
       - uses: actions/upload-artifact@v4
         if: env.KEYSTORE_B64 != ''
         with:
@@ -120,7 +123,7 @@ keyPassword=%s
           GH_TOKEN: ${{ github.token }}
         run: |
           version="${GITHUB_REF_NAME#v}"
-          notes=$(awk -v v="$version" '$0 ~ "^## \[" v "\]" {f=1; next} /^## \[/ {f=0} f' CHANGELOG.md)
+          notes=$(awk -v v="$version" 'index($0, "## [" v "]") == 1 {f=1; next} /^## / {f=0} f' CHANGELOG.md)
           gh release create "$GITHUB_REF_NAME" \
             --title "Oval ${version}" \
             --notes "${notes:-Oval ${version}}" \
