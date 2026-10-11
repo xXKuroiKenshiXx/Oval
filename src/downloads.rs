@@ -132,6 +132,7 @@ impl Queue {
     }
 
     /// Whether anything is downloading or waiting to.
+    #[cfg(windows)]
     pub fn busy(&self) -> bool {
         self.jobs
             .lock()
