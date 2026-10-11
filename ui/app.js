@@ -10,7 +10,7 @@ const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 
 const store = {
   get(key, fallback) {
-    try { return localStorage.getItem(key) ?? fallback; } catch { return fallback; }
+    try { const v = localStorage.getItem(key); return v === null ? fallback : v; } catch { return fallback; }
   },
   set(key, value) {
     try { localStorage.setItem(key, value); } catch { /* private mode */ }
@@ -175,7 +175,7 @@ const currentQuality = (ctx) => quality[qualityKey(ctx)] || null;
 function renderQuality() {
   for (const chip of $$(".qchip")) {
     const key = qualityKey(chip.dataset.ctx);
-    const entry = QUALITIES[key].find(([v]) => v === quality[key]) ?? QUALITIES[key][0];
+    const entry = QUALITIES[key].find(([v]) => v === quality[key]) || QUALITIES[key][0];
     $(".qlabel", chip).textContent = entry[2];
   }
 }
@@ -266,7 +266,7 @@ function renderEngine() {
   for (const el of $$(".engine")) {
     el.hidden = engine.ready;
     el.classList.toggle("indeterminate", engine.progress == null);
-    $(".engine-ring", el).style.setProperty("--p", engine.progress ?? 0);
+    $(".engine-ring", el).style.setProperty("--p", engine.progress == null ? 0 : engine.progress);
     const pct = engine.progress != null ? ` ${Math.round(engine.progress * 100)}%` : "";
     $(".engine-text", el).textContent = engine.message + pct;
   }
@@ -349,7 +349,8 @@ function renderJob(j) {
       invoke("cancel", { id: j.id });
     });
     el.addEventListener("click", () => {
-      if (jobs.get(j.id)?.data.status !== "done") return;
+      const cur = jobs.get(j.id);
+      if (!cur || cur.data.status !== "done") return;
       if (MOBILE) toast("Guardado en Descargas/Oval");
       else invoke("reveal", { id: j.id });
     });
@@ -433,7 +434,7 @@ let lastClip = "";
 async function suggestFromClipboard() {
   const input = $(INPUTS[tab]);
   if (input.value) return;
-  const text = (await invoke("clipboard_text").catch(() => null))?.trim();
+  const text = ((await invoke("clipboard_text").catch(() => null)) || "").trim();
   if (!text || text === lastClip || text.length > 2000) return;
   lastClip = text;
   const url = normalizeUrl(text);
@@ -489,7 +490,8 @@ function tileFor(entry, i) {
     `<span class="t">${esc(entry.title)}</span>`;
   if (!matches(entry)) t.hidden = true;
   // Some sites block hotlinked thumbnails: fall back to the placeholder.
-  $("img", t)?.addEventListener("error", () => {
+  const img = $("img", t);
+  if (img) img.addEventListener("error", () => {
     t.classList.add("noimg");
     t.style.setProperty("--h", (i * 47) % 360);
     $("img", t).remove();
@@ -499,7 +501,8 @@ function tileFor(entry, i) {
 
 function setOff(i, off) {
   if (off) channel.off.add(i); else channel.off.delete(i);
-  $(`.tile[data-i="${i}"]`)?.classList.toggle("off", off);
+  const tile = $(`.tile[data-i="${i}"]`);
+  if (tile) tile.classList.toggle("off", off);
 }
 
 async function loadChannel() {
@@ -518,7 +521,7 @@ async function loadChannel() {
   $("#channel-go").classList.add("busy");
   renderCount();
   // A pasted ".../streams" or ".../shorts" link picks that section.
-  const fromUrl = new URL(url).pathname.match(/\/(videos|shorts|streams)\/?$/)?.[1];
+  const fromUrl = (new URL(url).pathname.match(/\/(videos|shorts|streams)\/?$/) || [])[1];
   if (fromUrl) $$("#ctabs button").forEach((x) => x.classList.toggle("on", x.dataset.ctab === fromUrl));
   const section = $("#ctabs .on").dataset.ctab;
   try {
@@ -566,13 +569,15 @@ function applyDisk(i) {
   if (state === "have" && !channel.have.has(i)) {
     channel.have.add(i);
     channel.off.add(i);
-    tile?.classList.remove("partial");
-    tile?.classList.add("have", "off");
+    if (tile) {
+      tile.classList.remove("partial");
+      tile.classList.add("have", "off");
+    }
     if (tile) $(".have-tag", tile).textContent = "Ya descargado";
     return "have";
   }
   if (state === "partial" && !channel.have.has(i)) {
-    tile?.classList.add("partial");
+    if (tile) tile.classList.add("partial");
     if (tile) $(".have-tag", tile).textContent = "A medias · se continúa";
     return "partial";
   }
@@ -797,7 +802,7 @@ function wire() {
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "v" && !(document.activeElement instanceof HTMLInputElement)) {
       $(INPUTS[tab]).focus();
     }
-    if (e.key === "Escape") { closeMenu(); document.activeElement?.blur?.(); }
+    if (e.key === "Escape") { closeMenu(); if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); }
   });
 
   // Links dropped on the oval go to whatever tab fits them.
@@ -829,7 +834,8 @@ async function main() {
   restoreSize();
 
   await listen("job", (e) => {
-    const was = jobs.get(e.payload.id)?.data.status;
+    const prev = jobs.get(e.payload.id);
+    const was = prev && prev.data.status;
     renderJob(e.payload);
     if (e.payload.status === "done" && was && was !== "done") refreshDiskSoon();
   });

@@ -60,8 +60,10 @@ android {
             if (rootProject.file("keystore.properties").exists()) {
                 signingConfig = signingConfigs.getByName("release")
             }
+            // No R8: youtubedl-android and the libraries it uses (Commons Compress,
+            // Jackson) rely on reflection, and shrinking them crashes the first launch.
             optimization {
-               enable = true
+               enable = false
             }
             proguardFiles(
                 *fileTree(".") {

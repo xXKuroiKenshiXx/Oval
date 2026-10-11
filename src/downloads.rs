@@ -305,9 +305,10 @@ impl Queue {
     }
 }
 
-/// YouTube flags connections that fetch a lot ("confirm you're not a bot").
-/// Its embedded and mobile web players still answer then, so for a while
-/// after a block every YouTube request also asks those, a bit more slowly.
+/// YouTube flags connections that fetch a lot ("confirm you're not a bot", or
+/// lately just "This video is not available"). Its embedded and mobile web
+/// players still answer then, so every YouTube request asks those too, and for
+/// a while after a block requests also go out more slowly.
 static YOUTUBE_FALLBACK_UNTIL: Mutex<Option<Instant>> = Mutex::new(None);
 const YOUTUBE_FALLBACK_FOR: Duration = Duration::from_secs(30 * 60);
 
@@ -316,28 +317,33 @@ pub(crate) fn is_youtube(url: &str) -> bool {
     u.contains("youtube.com/") || u.contains("youtu.be/")
 }
 
-/// Extra yt-dlp arguments for YouTube while the fallback is active.
+/// Extra yt-dlp arguments for YouTube.
 pub(crate) fn youtube_args(url: &str) -> Vec<String> {
-    let active = YOUTUBE_FALLBACK_UNTIL
+    if !is_youtube(url) {
+        return Vec::new();
+    }
+    let mut args: Vec<String> = [
+        "--extractor-args",
+        "youtube:player_client=default,web_embedded,mweb",
+    ]
+    .map(String::from)
+    .to_vec();
+    let slow_down = YOUTUBE_FALLBACK_UNTIL
         .lock()
         .unwrap()
         .is_some_and(|until| Instant::now() < until);
-    if !active || !is_youtube(url) {
-        return Vec::new();
+    if slow_down {
+        args.extend(["--sleep-requests", "1"].map(String::from));
     }
-    [
-        "--extractor-args",
-        "youtube:player_client=default,web_embedded,mweb",
-        "--sleep-requests",
-        "1",
-    ]
-    .map(String::from)
-    .to_vec()
+    args
 }
 
+/// A block, or the "not available" YouTube now answers with during one.
 fn is_youtube_block(error: &str) -> bool {
-    error.starts_with("YouTube frenó")
+    error.starts_with("YouTube frenó") || error == NOT_AVAILABLE
 }
+
+const NOT_AVAILABLE: &str = "El vídeo no está disponible";
 
 /// Starts queued jobs until the concurrency limit is reached. Live recordings
 /// start right away and don't count towards the limit.
@@ -811,8 +817,8 @@ pub(crate) fn clean_error(msg: &str) -> String {
         "El vídeo es privado".into()
     } else if lower.contains("sign in") || lower.contains("login") || lower.contains("cookies") {
         "El sitio pide iniciar sesión".into()
-    } else if lower.contains("unavailable") {
-        "El vídeo no está disponible".into()
+    } else if lower.contains("unavailable") || lower.contains("not available") {
+        NOT_AVAILABLE.into()
     } else {
         msg.chars().take(140).collect()
     }
@@ -953,6 +959,13 @@ mod tests {
             clean_error("[youtube] x: Sign in to confirm you’re not a bot. Use --cookies")
                 .starts_with("YouTube frenó")
         );
+        assert_eq!(
+            clean_error("ERROR: [youtube] Y5N_KNDfAls: This video is not available"),
+            NOT_AVAILABLE
+        );
+        assert!(is_youtube_block(&clean_error(
+            "[youtube] x: This video is not available"
+        )));
     }
 
     #[test]

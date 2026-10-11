@@ -1,2 +1,4 @@
 -keep class com.yausername.** { *; }
 -keep class io.github.xxkuroikenshixx.oval.engine.** { *; }
+-keep class org.apache.commons.compress.** { *; }
+-keep class com.fasterxml.jackson.** { *; }

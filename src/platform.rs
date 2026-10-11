@@ -8,10 +8,18 @@ use std::process::Command;
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 /// Configures a helper process: no console window on Windows; on Linux its own
-/// process group (so `kill_tree` reaches FFmpeg too) that dies with the app.
+/// process group (so `kill_tree` reaches FFmpeg too) that dies with the app,
+/// without the AppImage's library and Python paths.
 pub fn prepare(cmd: &mut tokio::process::Command) {
     #[cfg(windows)]
     cmd.creation_flags(CREATE_NO_WINDOW);
+    #[cfg(unix)]
+    for (key, value) in appimage_env_fixes(std::env::vars()) {
+        match value {
+            Some(v) => cmd.env(key, v),
+            None => cmd.env_remove(key),
+        };
+    }
     #[cfg(unix)]
     unsafe {
         cmd.process_group(0);
@@ -21,6 +29,38 @@ pub fn prepare(cmd: &mut tokio::process::Command) {
             Ok(())
         });
     }
+}
+
+/// Inside an AppImage, the launcher points LD_LIBRARY_PATH, PYTHONHOME and the
+/// like at the bundled libraries. yt-dlp, FFmpeg and Deno bring their own and
+/// must not pick those up: returns the variables to drop (`None`) or rewrite
+/// (PATH-like lists, minus the AppImage's entries).
+#[cfg(unix)]
+fn appimage_env_fixes(
+    vars: impl Iterator<Item = (String, String)>,
+) -> Vec<(String, Option<String>)> {
+    let vars: Vec<(String, String)> = vars.collect();
+    let Some(appdir) = vars
+        .iter()
+        .find(|(k, _)| k == "APPDIR")
+        .map(|(_, v)| v.trim_end_matches('/').to_string())
+        .filter(|d| !d.is_empty())
+    else {
+        return Vec::new();
+    };
+    let mut fixes = Vec::new();
+    for (key, value) in vars {
+        if !value.contains(&appdir) {
+            continue;
+        }
+        let kept: Vec<&str> = value
+            .split(':')
+            .filter(|part| !part.is_empty() && !part.starts_with(&appdir))
+            .collect();
+        let keep_rest = matches!(key.as_str(), "PATH" | "XDG_DATA_DIRS");
+        fixes.push((key, (keep_rest && !kept.is_empty()).then(|| kept.join(":"))));
+    }
+    fixes
 }
 
 /// Inset of the CSS oval inside the transparent window, in logical pixels.
@@ -155,5 +195,35 @@ pub fn reveal(path: &Path) {
             path
         };
         let _ = Command::new("xdg-open").arg(target).spawn();
+    }
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::appimage_env_fixes;
+
+    #[test]
+    fn appimage_paths_stay_out_of_helpers() {
+        let vars = [
+            ("APPDIR", "/tmp/.mount_Oval"),
+            ("PATH", "/tmp/.mount_Oval/usr/bin/:/usr/bin:/bin"),
+            ("LD_LIBRARY_PATH", "/tmp/.mount_Oval/usr/lib/:"),
+            ("PYTHONHOME", "/tmp/.mount_Oval/usr/"),
+            ("HOME", "/home/me"),
+        ]
+        .map(|(k, v)| (k.to_string(), v.to_string()));
+        let fixes = appimage_env_fixes(vars.into_iter());
+        let get = |k: &str| {
+            fixes
+                .iter()
+                .find(|(key, _)| key == k)
+                .map(|(_, v)| v.clone())
+        };
+        assert_eq!(get("PATH"), Some(Some("/usr/bin:/bin".into())));
+        assert_eq!(get("LD_LIBRARY_PATH"), Some(None));
+        assert_eq!(get("PYTHONHOME"), Some(None));
+        assert_eq!(get("APPDIR"), Some(None));
+        assert_eq!(get("HOME"), None);
+        assert!(appimage_env_fixes(std::iter::empty()).is_empty());
     }
 }

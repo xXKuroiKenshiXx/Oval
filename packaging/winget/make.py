@@ -35,7 +35,7 @@ ManifestVersion: {SCHEMA}
 
 (out / f"{ID}.installer.yaml").write_text(head("installer") + f"""PackageIdentifier: {ID}
 PackageVersion: {version}
-InstallerType: nsis
+InstallerType: nullsoft
 Scope: user
 InstallModes:
 - interactive

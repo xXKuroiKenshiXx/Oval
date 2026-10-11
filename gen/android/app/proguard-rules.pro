@@ -22,5 +22,7 @@
 # youtubedl-android loads these through reflection (Jackson, its mappers).
 -keep class com.yausername.** { *; }
 -keep class com.fasterxml.jackson.** { *; }
+-keep class org.apache.commons.compress.** { *; }
+-dontwarn org.apache.commons.compress.**
 -dontwarn com.fasterxml.jackson.**
 -keep class io.github.xxkuroikenshixx.oval.** { *; }

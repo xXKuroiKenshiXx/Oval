@@ -75,7 +75,7 @@ class EnginePlugin(private val activity: Activity) : Plugin(activity) {
                 val ret = JSObject()
                 ret.put("version", YoutubeDL.getInstance().version(activity.applicationContext) ?: "")
                 invoke.resolve(ret)
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
                 invoke.reject(e.message ?: "No se pudo preparar el motor")
             }
         }
@@ -91,7 +91,7 @@ class EnginePlugin(private val activity: Activity) : Plugin(activity) {
                 val ret = JSObject()
                 ret.put("status", status.toString())
                 invoke.resolve(ret)
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
                 invoke.reject(e.message ?: "No se pudo actualizar el motor")
             }
         }
@@ -118,7 +118,7 @@ class EnginePlugin(private val activity: Activity) : Plugin(activity) {
                 code = response.exitCode
             } catch (e: YoutubeDL.CanceledException) {
                 code = 130
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
                 (e.message ?: "ERROR: yt-dlp falló").lineSequence()
                     .filter { it.isNotBlank() }
                     .forEach { a.channel.emit("err", it) }
@@ -130,7 +130,7 @@ class EnginePlugin(private val activity: Activity) : Plugin(activity) {
     @Command
     fun kill(invoke: Invoke) {
         val a = invoke.parseArgs(IdArgs::class.java)
-        YoutubeDL.getInstance().destroyProcessById(a.id.toString())
+        runCatching { YoutubeDL.getInstance().destroyProcessById(a.id.toString()) }
         invoke.resolve()
     }
 

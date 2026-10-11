@@ -2,11 +2,22 @@
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-10-11
+
+### Fixed
+- Android: la app se cerraba al abrirla por primera vez (pantalla negra). La versión publicada
+  optimizaba con R8 la librería que descomprime el motor y fallaba en cualquier teléfono.
+- Android: la interfaz no aparecía en teléfonos con un WebView antiguo (Android 7 a 10 sin
+  actualizar).
+- YouTube: cuando frenaba la conexión a veces respondía «This video is not available»; ahora
+  Oval usa siempre los reproductores alternativos y reintenta solo.
+- AppImage: yt-dlp, FFmpeg y Deno ya no heredan las librerías internas de la AppImage.
+- Flatpak: se vuelve a construir en GitHub Actions.
+
 ## [0.2.0] - 2026-10-11
 
 ### Added
 - Paquetes para más sistemas Linux: Flatpak, .rpm (Fedora, openSUSE), Arch Linux y Void Linux.
-- La APK de Android se compila y firma en GitHub Actions junto con el resto.
 - Canal: los vídeos que quedaron a medias (descarga cortada o app cerrada) se marcan con borde
   punteado amarillo y siguen desde donde iban.
 - Canal: los archivos sin `[id]` en el nombre también cuentan como descargados si el título coincide.
