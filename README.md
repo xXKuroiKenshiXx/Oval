@@ -6,13 +6,17 @@
 
 <p align="center">
   Un descargador de vídeos minimalista, redondo y rápido.<br>
-  Pega un enlace, pulsa descargar. Nada más.
+  Pega un enlace, pulsa descargar. Nada más.<br>
+  Vídeos sueltos, canales enteros y directos en tiempo real, en Windows y Linux.
 </p>
 
 <p align="center">
-  <img src="docs/link.png" width="420" alt="Cola de descargas">
-  &nbsp;
-  <img src="docs/channel.png" width="420" alt="Descarga de un canal">
+  <a href="docs/demo.mp4"><img src="docs/demo.webp" width="800" alt="Oval descargando vídeos, un canal y un directo"></a>
+</p>
+
+<p align="center">
+  <sub>Grabación real de la app · <a href="docs/demo.mp4">ver en MP4</a> ·
+  contenido: películas abiertas de la <a href="https://studio.blender.org">Blender Foundation</a> (CC BY) y directo de la NASA</sub>
 </p>
 
 ## Qué hace

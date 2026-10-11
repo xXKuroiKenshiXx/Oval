@@ -1,5 +1,8 @@
 //! Lists every video of a channel or playlist without downloading anything,
 //! streaming entries to the UI page by page so the grid fills in right away.
+//!
+//! The fast "flat" listing has no thumbnails on many sites (PeerTube, Vimeo,
+//! ...), so a second, slower pass fills them in afterwards.
 
 use std::process::Stdio;
 use std::sync::Mutex;
@@ -28,6 +31,21 @@ struct Batch {
     token: u64,
     channel: Option<String>,
     entries: Vec<Entry>,
+}
+
+/// Thumbnail and duration found by the second pass, by position in the list.
+#[derive(Clone, Serialize)]
+struct Detail {
+    index: usize,
+    thumbnail: Option<String>,
+    duration: Option<f64>,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Details {
+    token: u64,
+    items: Vec<Detail>,
 }
 
 #[derive(Serialize)]
@@ -143,6 +161,7 @@ pub async fn list(app: &AppHandle, url: &str, tab: &str, token: u64) -> Result<S
     let mut channel: Option<String> = None;
     let mut pending = Vec::new();
     let mut count = 0usize;
+    let mut missing = 0usize;
     let mut last_emit = Instant::now();
     let mut lines = BufReader::new(child.stdout.take().expect("piped stdout")).split(b'\n');
     while let Ok(Some(raw)) = lines.next_segment().await {
@@ -158,6 +177,7 @@ pub async fn list(app: &AppHandle, url: &str, tab: &str, token: u64) -> Result<S
                 .find_map(|k| v.get(*k).and_then(Value::as_str))
                 .map(str::to_string);
         }
+        missing += usize::from(entry.thumbnail.is_none());
         pending.push(entry);
         count += 1;
         if pending.len() >= 60 || last_emit.elapsed() > Duration::from_millis(150) {
@@ -197,11 +217,105 @@ pub async fn list(app: &AppHandle, url: &str, tab: &str, token: u64) -> Result<S
     if count == 0 && !status.is_some_and(|s| s.success()) {
         return Err(error.unwrap_or_else(|| "No se encontraron vídeos".into()));
     }
+    if missing > 0 {
+        tauri::async_runtime::spawn(fill_details(
+            app.clone(),
+            tools.ytdlp.clone(),
+            url,
+            token,
+            listing,
+        ));
+    }
     Ok(Summary {
         token,
         channel,
         count,
     })
+}
+
+/// Second pass: full extraction of each entry, streamed, only for thumbnails
+/// and durations. Runs until done or until another listing starts.
+async fn fill_details(
+    app: AppHandle,
+    ytdlp: std::path::PathBuf,
+    url: String,
+    token: u64,
+    listing: u64,
+) {
+    let mut cmd = Command::new(ytdlp);
+    cmd.args([
+        "--ignore-config",
+        "--no-warnings",
+        "--ignore-errors",
+        "--lazy-playlist",
+        "--skip-download",
+        "--print",
+        "%(.{playlist_index,thumbnail,duration})j",
+        "--",
+        &url,
+    ])
+    .env("PYTHONIOENCODING", "utf-8")
+    .stdin(Stdio::null())
+    .stdout(Stdio::piped())
+    .stderr(Stdio::null())
+    .kill_on_drop(true);
+    platform::prepare(&mut cmd);
+    let Ok(mut child) = cmd.spawn() else { return };
+    platform::adopt_child(&child);
+    {
+        let mut cur = CURRENT.lock().unwrap();
+        if cur.0 != listing {
+            return;
+        }
+        cur.1 = child.id(); // so `cancel` stops this pass too
+    }
+    let mut pending = Vec::new();
+    let mut last_emit = Instant::now();
+    let mut lines = BufReader::new(child.stdout.take().expect("piped stdout")).split(b'\n');
+    while let Ok(Some(raw)) = lines.next_segment().await {
+        if CURRENT.lock().unwrap().0 != listing {
+            return;
+        }
+        let Ok(v) = serde_json::from_slice::<Value>(&raw) else {
+            continue;
+        };
+        let Some(index) = v.get("playlist_index").and_then(Value::as_u64) else {
+            continue;
+        };
+        pending.push(Detail {
+            index: (index as usize).saturating_sub(1),
+            thumbnail: v
+                .get("thumbnail")
+                .and_then(Value::as_str)
+                .filter(|t| t.starts_with("http"))
+                .map(str::to_string),
+            duration: v.get("duration").and_then(Value::as_f64),
+        });
+        if pending.len() >= 12 || last_emit.elapsed() > Duration::from_millis(200) {
+            let _ = app.emit(
+                "channel-details",
+                Details {
+                    token,
+                    items: std::mem::take(&mut pending),
+                },
+            );
+            last_emit = Instant::now();
+        }
+    }
+    if !pending.is_empty() {
+        let _ = app.emit(
+            "channel-details",
+            Details {
+                token,
+                items: pending,
+            },
+        );
+    }
+    let _ = child.wait().await;
+    let mut cur = CURRENT.lock().unwrap();
+    if cur.0 == listing {
+        cur.1 = None;
+    }
 }
 
 fn parse_entry(v: &Value, youtube: bool) -> Option<Entry> {

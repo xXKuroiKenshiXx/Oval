@@ -424,6 +424,10 @@ async fn run_job(app: &AppHandle, id: u64, run: u64) -> Result<(), String> {
                 &sort,
                 "--merge-output-format",
                 "mp4",
+                // Single-file downloads (archive.org, some sites) come as AVI,
+                // FLV or MOV; repackage them so everything ends up as MP4.
+                "--remux-video",
+                "avi>mp4/flv>mp4/mov>mp4/webm>mp4",
             ]);
         }
         Mode::Audio => {
@@ -740,6 +744,9 @@ pub(crate) fn clean_error(msg: &str) -> String {
         "El canal no está en directo ahora".into()
     } else if lower.contains("unsupported url") {
         "Este enlace no es compatible".into()
+    } else if lower.contains("not a bot") || lower.contains("too many requests") {
+        // YouTube throttles connections that fetch a lot in a short time.
+        "YouTube frenó la conexión por exceso de descargas; reintenta en unos minutos".into()
     } else if lower.contains("private") {
         "El vídeo es privado".into()
     } else if lower.contains("sign in") || lower.contains("login") || lower.contains("cookies") {
@@ -793,6 +800,10 @@ mod tests {
         assert_eq!(
             clean_error("[twitch:stream] abc: The channel is not currently live"),
             "El canal no está en directo ahora"
+        );
+        assert!(
+            clean_error("[youtube] x: Sign in to confirm you’re not a bot. Use --cookies")
+                .starts_with("YouTube frenó")
         );
     }
 

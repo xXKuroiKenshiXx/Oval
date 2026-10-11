@@ -17,3 +17,7 @@
 - Carpeta de destino configurable.
 - Motor (yt-dlp, FFmpeg) descargado en el primer arranque y actualizado a diario.
 - Paquetes para Windows (instalador y portable) y Linux (AppImage y .deb).
+- En la pestaña Canal, las miniaturas y duraciones que el listado rápido no trae (PeerTube y otros
+  sitios) se completan en segundo plano.
+- Los vídeos que llegan en AVI, FLV, MOV o WebM se reempaquetan a MP4 sin recodificar.
+- Mensaje claro cuando YouTube frena la conexión por exceso de descargas.

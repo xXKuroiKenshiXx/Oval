@@ -701,6 +701,8 @@ button.pill-icon:hover { background: var(--surface-2); color: var(--text); }
     url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='white' fill-opacity='.5' d='M9 7.3v9.4a.8.8 0 0 0 1.2.7l7.3-4.7a.8.8 0 0 0 0-1.4l-7.3-4.7A.8.8 0 0 0 9 7.3z'/%3E%3C/svg%3E") center 40% / 28px no-repeat,
     linear-gradient(135deg, hsl(var(--h, 200) 45% 38%), hsl(calc(var(--h, 200) + 50) 45% 18%));
 }
+.tile img.late { animation: fade-in 0.5s var(--ease) both; }
+@keyframes fade-in { from { opacity: 0; } }
 .tile .shade {
   position: absolute;
   inset: 0;

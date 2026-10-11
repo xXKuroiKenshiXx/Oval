@@ -530,6 +530,30 @@ function onBatch({ token, channel: name, entries }) {
   renderCount();
 }
 
+/** Thumbnails and durations arriving from the slower second pass. */
+function onDetails({ token, items }) {
+  if (token !== channel.token) return;
+  for (const { index, thumbnail, duration } of items) {
+    const entry = channel.entries[index];
+    const tile = $(`.tile[data-i="${index}"]`);
+    if (!entry || !tile) continue;
+    if (duration && !entry.duration) {
+      entry.duration = duration;
+      tile.insertAdjacentHTML("afterbegin", `<span class="dur">${stamp(duration)}</span>`);
+    }
+    if (thumbnail && !entry.thumbnail) {
+      entry.thumbnail = thumbnail;
+      const img = new Image();
+      img.alt = "";
+      img.draggable = false;
+      img.referrerPolicy = "no-referrer";
+      img.className = "late";
+      img.onload = () => { tile.classList.remove("noimg"); tile.prepend(img); };
+      img.src = thumbnail;
+    }
+  }
+}
+
 async function downloadSelection() {
   const items = channel.entries
     .filter((_, i) => !channel.off.has(i))
@@ -677,6 +701,7 @@ async function main() {
   await listen("job-removed", (e) => removeJob(e.payload));
   await listen("engine", (e) => { engine = e.payload; renderEngine(); });
   await listen("channel-batch", (e) => onBatch(e.payload));
+  await listen("channel-details", (e) => onDetails(e.payload));
 
   for (const j of await invoke("jobs")) renderJob(j);
   $("#conc").textContent = await invoke("get_concurrency");
