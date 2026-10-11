@@ -1,6 +1,6 @@
 [package]
 name = "oval"
-version = "0.2.1"
+version = "0.3.0"
 description = "Minimal oval video downloader"
 authors = ["xXKuroiKenshiXx"]
 license = "MIT"
@@ -28,6 +28,7 @@ tauri-plugin-clipboard-manager = "2"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream", "json"] }
 futures-util = "0.3"
 zip = { version = "2", default-features = false, features = ["deflate"] }
+trash = "5"
 tauri-plugin-dialog = "2"
 
 # Android: yt-dlp runs inside the app through this plugin.
@@ -44,6 +45,7 @@ windows-sys = { version = "0.59", features = [
     "Win32_Foundation",
     "Win32_Security",
     "Win32_System_JobObjects",
+    "Win32_System_Power",
     "Win32_System_Threading",
 ] }
 

@@ -2,6 +2,23 @@
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-11
+
+### Added
+- Papelera en las descargas terminadas: dos toques y el archivo se borra (a la papelera de reciclaje
+  en Windows y Linux). La × sigue quitándola solo de la lista.
+
+### Fixed
+- Android: las descargas ya no se frenan con la pantalla apagada o la app en segundo plano. Mientras
+  descarga, Oval mantiene un servicio con la notificación «Descargando…», la CPU despierta y el
+  Wi-Fi fuera del ahorro de energía.
+- Descargas más estables en todas las versiones: si la conexión se corta, reintenta solas con pausas
+  crecientes en lugar de fallar.
+- Windows: el PC ya no se suspende en mitad de una descarga.
+- Windows: un vídeo de un canal ya no puede quedar fuera de la carpeta del canal; al terminar se
+  comprueba dónde quedó, se mueve dentro si hace falta y se borra la carpeta vacía con su nombre.
+  Los nombres de carpeta ya no terminan en punto o espacio ni usan nombres reservados de Windows.
+
 ## [0.2.1] - 2026-10-11
 
 ### Fixed

@@ -91,6 +91,11 @@ fn cancel(app: AppHandle, queue: State<Queue>, id: u64) {
 }
 
 #[tauri::command]
+fn delete_file(app: AppHandle, queue: State<Queue>, id: u64) -> Result<(), String> {
+    queue.delete_file(&app, id)
+}
+
+#[tauri::command]
 fn clear_finished(app: AppHandle, queue: State<Queue>) {
     queue.clear_finished(&app)
 }
@@ -205,6 +210,11 @@ pub fn run() {
             if let Some(window) = app.get_webview_window("main") {
                 platform::click_through_outside_oval(window);
             }
+            #[cfg(windows)]
+            {
+                let handle = app.handle().clone();
+                platform::keep_awake_while(move || handle.state::<Queue>().busy());
+            }
             // Warm the engine up front so the first download starts instantly.
             tauri::async_runtime::spawn(engine::warm_up(app.handle().clone()));
             Ok(())
@@ -219,6 +229,7 @@ pub fn run() {
             resume,
             cancel,
             clear_finished,
+            delete_file,
             reveal,
             get_concurrency,
             set_concurrency,

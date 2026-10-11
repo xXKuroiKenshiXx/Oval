@@ -180,6 +180,10 @@
       emit("job-removed", id);
       schedule();
     },
+    delete_file: ({ id }) => {
+      jobs.delete(id);
+      emit("job-removed", id);
+    },
     clear_finished: () => {
       for (const [id, j] of jobs) {
         if (j.status === "done") {

@@ -131,6 +131,15 @@ impl Queue {
         self.jobs.lock().unwrap().clone()
     }
 
+    /// Whether anything is downloading or waiting to.
+    pub fn busy(&self) -> bool {
+        self.jobs
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|j| j.status.is_active() || j.status == Status::Queued)
+    }
+
     pub fn add(
         &self,
         app: &AppHandle,
@@ -262,6 +271,25 @@ impl Queue {
             });
         }
         schedule(app);
+    }
+
+    /// Deletes a finished download from disk (to the recycle bin on desktop)
+    /// and takes it off the list.
+    pub fn delete_file(&self, app: &AppHandle, id: u64) -> Result<(), String> {
+        let path = {
+            let jobs = self.jobs.lock().unwrap();
+            let job = jobs
+                .iter()
+                .find(|j| j.id == id && j.status == Status::Done)
+                .ok_or("La descarga ya no está en la lista")?;
+            job.path.clone().map(PathBuf::from)
+        };
+        if let Some(path) = path.filter(|p| p.is_file()) {
+            remove_to_trash(&path).map_err(|e| format!("No se pudo borrar el archivo: {e}"))?;
+        }
+        self.jobs.lock().unwrap().retain(|j| j.id != id);
+        let _ = app.emit("job-removed", id);
+        Ok(())
     }
 
     pub fn clear_finished(&self, app: &AppHandle) {
@@ -446,6 +474,20 @@ async fn run_job(app: &AppHandle, id: u64, run: u64) -> Result<(), String> {
         "--no-mtime",
         "--concurrent-fragments",
         "8",
+        // Unstable connections: retry with growing pauses instead of failing,
+        // and give Windows antivirus time to let go of a file before renaming.
+        "--retries",
+        "10",
+        "--fragment-retries",
+        "10",
+        "--retry-sleep",
+        "http:exp=1:20",
+        "--retry-sleep",
+        "fragment:exp=1:20",
+        "--file-access-retries",
+        "10",
+        "--socket-timeout",
+        "20",
     ]
     .map(String::from)
     .to_vec();
@@ -554,10 +596,24 @@ async fn run_job(app: &AppHandle, id: u64, run: u64) -> Result<(), String> {
     if live {
         return finish_recording(app, id, run, success, error).await;
     }
+    let settled = if success {
+        let path = {
+            let jobs = q.jobs.lock().unwrap();
+            jobs.iter()
+                .find(|j| j.id == id && j.run == run)
+                .and_then(|j| j.path.clone())
+        };
+        path.and_then(|p| settle_file(&dir, Path::new(&p)))
+    } else {
+        None
+    };
     q.update_run(app, id, run, |j| {
         j.pid = None;
         j.speed = 0.0;
         j.eta = None;
+        if let Some(p) = settled {
+            j.path = Some(p.display().to_string());
+        }
         if success {
             j.status = Status::Done;
             j.progress = 1.0;
@@ -779,6 +835,42 @@ fn handle_line(app: &AppHandle, id: u64, run: u64, live: bool, line: &str) {
     }
 }
 
+/// Second check once a download is done: the file has to be inside the job's
+/// folder. On Windows a channel's video has now and then ended up next to the
+/// folder (beside an empty folder named after the video); this moves it in and
+/// drops such empty folders. Returns the file's final path.
+fn settle_file(dir: &Path, path: &Path) -> Option<PathBuf> {
+    let name = path.file_name()?;
+    let target = dir.join(name);
+    let mut found = path.to_path_buf();
+    if !same_dir(path.parent(), dir) {
+        if path.is_file() && !target.exists() {
+            let moved = std::fs::rename(path, &target).is_ok()
+                || (std::fs::copy(path, &target).is_ok() && std::fs::remove_file(path).is_ok());
+            if moved {
+                found = target;
+            }
+        } else if target.is_file() {
+            found = target;
+        }
+    }
+    if let Some(stem) = found.file_stem() {
+        for base in [Some(dir), dir.parent()].into_iter().flatten() {
+            // Only succeeds for an empty folder, so nothing real is lost.
+            let _ = std::fs::remove_dir(base.join(stem));
+        }
+    }
+    found.is_file().then_some(found)
+}
+
+fn same_dir(a: Option<&Path>, b: &Path) -> bool {
+    let Some(a) = a else { return false };
+    match (a.canonicalize(), b.canonicalize()) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => a == b,
+    }
+}
+
 fn remove_partials(dir: &Path, stem: Option<&str>) {
     let Some(stem) = stem.filter(|s| !s.is_empty()) else {
         return;
@@ -920,8 +1012,24 @@ fn classify(name: &str) -> Option<File<'_>> {
     (is_media(ext) && !stem.trim().is_empty()).then_some(File::Named(stem.trim()))
 }
 
+#[cfg(desktop)]
+fn remove_to_trash(path: &Path) -> Result<(), String> {
+    trash::delete(path)
+        .or_else(|_| std::fs::remove_file(path))
+        .map_err(|e| e.to_string())
+}
+
+#[cfg(mobile)]
+fn remove_to_trash(path: &Path) -> Result<(), String> {
+    std::fs::remove_file(path).map_err(|e| e.to_string())
+}
+
+/// A folder name that is valid everywhere, Windows included: no reserved
+/// characters or device names, and no trailing dots or spaces (which Windows
+/// drops, so the folder Oval asks for and the one it gets would differ).
 pub fn sanitize(name: &str) -> String {
-    name.chars()
+    let cleaned: String = name
+        .chars()
         .map(|c| {
             if r#"<>:"/\|?*"#.contains(c) || c.is_control() {
                 ' '
@@ -930,11 +1038,20 @@ pub fn sanitize(name: &str) -> String {
             }
         })
         .collect::<String>()
-        .trim()
-        .trim_end_matches('.')
-        .chars()
-        .take(80)
-        .collect()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    let short: String = cleaned.chars().take(80).collect();
+    let mut out = short.trim_end_matches(['.', ' ']).to_string();
+    let stem = out.split('.').next().unwrap_or("").to_ascii_uppercase();
+    let reserved = matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL")
+        || ((stem.starts_with("COM") || stem.starts_with("LPT"))
+            && stem.len() == 4
+            && stem.as_bytes()[3].is_ascii_digit());
+    if reserved {
+        out.push('_');
+    }
+    out
 }
 
 #[cfg(test)]
@@ -990,7 +1107,29 @@ mod tests {
 
     #[test]
     fn folder_names_are_safe() {
-        assert_eq!(sanitize("A/B: C?"), "A B  C");
+        assert_eq!(sanitize("A/B: C?"), "A B C");
         assert_eq!(sanitize("name."), "name");
+        assert_eq!(sanitize("  Canal   de prueba . "), "Canal de prueba");
+        assert_eq!(sanitize("con"), "con_");
+        assert_eq!(sanitize("COM1.txt"), "COM1.txt_");
+        let long = format!("{} . x", "a".repeat(78));
+        assert!(!sanitize(&long).ends_with([' ', '.']));
+    }
+
+    #[test]
+    fn stray_files_land_in_their_folder() {
+        let root = std::env::temp_dir().join(format!("oval-settle-{}", std::process::id()));
+        let dir = root.join("Canal");
+        std::fs::create_dir_all(dir.join("Video [x]")).unwrap();
+        std::fs::create_dir_all(root.join("Video [x]")).unwrap();
+        let stray = root.join("Video [x].mp4");
+        std::fs::write(&stray, b"v").unwrap();
+        let settled = settle_file(&dir, &stray).unwrap();
+        assert_eq!(settled, dir.join("Video [x].mp4"));
+        assert!(!stray.exists() && settled.is_file());
+        assert!(!dir.join("Video [x]").exists() && !root.join("Video [x]").exists());
+        // Already in place: left alone.
+        assert_eq!(settle_file(&dir, &settled), Some(settled.clone()));
+        std::fs::remove_dir_all(&root).unwrap();
     }
 }

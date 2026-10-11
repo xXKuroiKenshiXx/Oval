@@ -151,6 +151,22 @@ pub fn adopt_child(child: &tokio::process::Child) {
 #[cfg(not(windows))]
 pub fn adopt_child(_child: &tokio::process::Child) {}
 
+/// Keeps Windows from going to sleep while `busy` says downloads are running:
+/// an idle PC that sleeps mid-download cuts it.
+#[cfg(windows)]
+pub fn keep_awake_while(busy: impl Fn() -> bool + Send + 'static) {
+    use windows_sys::Win32::System::Power::{SetThreadExecutionState, ES_SYSTEM_REQUIRED};
+    std::thread::spawn(move || loop {
+        if busy() {
+            // Resets the idle timer, the way media players do.
+            unsafe {
+                SetThreadExecutionState(ES_SYSTEM_REQUIRED);
+            }
+        }
+        std::thread::sleep(std::time::Duration::from_secs(30));
+    });
+}
+
 /// Kills a process together with any helpers it started (ffmpeg, etc.).
 pub fn kill_tree(pid: u32) {
     #[cfg(windows)]

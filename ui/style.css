@@ -550,6 +550,12 @@ button.pill-icon:hover { background: var(--surface-2); color: var(--text); }
 .act.stop:hover { background: var(--red-soft); color: var(--red); }
 .act.toggle svg.fill { fill: currentColor; stroke: none; }
 .item.done .act.toggle { display: none; }
+/* The trash can only shows on finished downloads; the first tap arms it. */
+.act.trash { display: none; }
+.item.done .act.trash { display: grid; }
+.act.trash:hover,
+.act.trash.armed { background: var(--red-soft); color: var(--red); }
+.act.trash.armed { box-shadow: inset 0 0 0 1.5px var(--red); animation: pop 0.3s var(--ease); }
 
 /* ---------- Footer ---------- */
 

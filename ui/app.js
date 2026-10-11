@@ -348,6 +348,31 @@ function renderJob(j) {
       el.classList.add("leaving");
       invoke("cancel", { id: j.id });
     });
+    // Deleting is two taps: the first arms the button for a few seconds.
+    const trash = $(".act.trash", el);
+    let disarm = 0;
+    trash.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      if (!trash.classList.contains("armed")) {
+        trash.classList.add("armed");
+        trash.title = "Toca otra vez para borrar";
+        clearTimeout(disarm);
+        disarm = setTimeout(() => {
+          trash.classList.remove("armed");
+          trash.title = "Borrar el archivo";
+        }, 3000);
+        return;
+      }
+      clearTimeout(disarm);
+      try {
+        await invoke("delete_file", { id: j.id });
+        toast(MOBILE ? "Vídeo borrado" : "Vídeo enviado a la papelera");
+        forgetOnDisk();
+      } catch (err) {
+        trash.classList.remove("armed");
+        toast(String(err), true);
+      }
+    });
     el.addEventListener("click", () => {
       const cur = jobs.get(j.id);
       if (!cur || cur.data.status !== "done") return;
@@ -601,6 +626,22 @@ async function markDownloaded(announce = false) {
     if (have) parts.push(`${have} ${have === 1 ? "ya está descargado" : "ya están descargados"} (en amarillo)`);
     if (partial) parts.push(`${partial} a medias, se continúan`);
     toast(parts.join(" · "));
+  }
+  renderCount();
+}
+
+/** A file was deleted: re-read the folder so its tile stops being yellow. */
+async function forgetOnDisk() {
+  if (!channel.entries.length || channel.loading) return;
+  const token = channel.token;
+  const disk = await readDisk();
+  if (!disk || token !== channel.token) return;
+  channel.disk = disk;
+  for (const i of [...channel.have]) {
+    if (diskState(channel.entries[i]) === "have") continue;
+    channel.have.delete(i);
+    const tile = $(`.tile[data-i="${i}"]`);
+    if (tile) tile.classList.remove("have");
   }
   renderCount();
 }

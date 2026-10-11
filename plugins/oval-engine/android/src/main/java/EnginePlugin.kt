@@ -104,6 +104,7 @@ class EnginePlugin(private val activity: Activity) : Plugin(activity) {
         invoke.resolve()
         pool.execute {
             var code = 1
+            DownloadService.acquire(activity)
             try {
                 ensureReady()
                 // The library ships QuickJS; yt-dlp needs a JavaScript runtime to
@@ -123,6 +124,7 @@ class EnginePlugin(private val activity: Activity) : Plugin(activity) {
                     .filter { it.isNotBlank() }
                     .forEach { a.channel.emit("err", it) }
             }
+            DownloadService.release(activity)
             a.channel.emit("exit", code)
         }
     }
@@ -134,18 +136,24 @@ class EnginePlugin(private val activity: Activity) : Plugin(activity) {
         invoke.resolve()
     }
 
-    /** Android 10 and older need the storage permission to write to Download/. */
+    /**
+     * Android 10 and older need the storage permission to write to Download/;
+     * Android 13+ asks before showing the "Descargando" notification.
+     */
     private fun askForStorage() {
-        if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.Q &&
-            ContextCompat.checkSelfPermission(activity, Manifest.permission.WRITE_EXTERNAL_STORAGE)
-            != PackageManager.PERMISSION_GRANTED
-        ) {
+        val wanted = mutableListOf<String>()
+        if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.Q) {
+            wanted.add(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+        }
+        if (Build.VERSION.SDK_INT >= 33) {
+            wanted.add("android.permission.POST_NOTIFICATIONS")
+        }
+        val missing = wanted.filter {
+            ContextCompat.checkSelfPermission(activity, it) != PackageManager.PERMISSION_GRANTED
+        }
+        if (missing.isNotEmpty()) {
             activity.runOnUiThread {
-                ActivityCompat.requestPermissions(
-                    activity,
-                    arrayOf(Manifest.permission.WRITE_EXTERNAL_STORAGE),
-                    4201,
-                )
+                ActivityCompat.requestPermissions(activity, missing.toTypedArray(), 4201)
             }
         }
     }

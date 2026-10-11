@@ -84,7 +84,8 @@ xbps-rindex -a oval-*.xbps && sudo xbps-install --repository="$PWD" oval   # Voi
 
 En Windows hace falta WebView2 (viene con Windows 11; el instalador lo añade si falta).
 En Android las descargas van a `Descargas/Oval`; los directos se guardan en `.ts`, que abre
-cualquier reproductor (VLC, MX Player…). Mantén la app abierta mientras descarga.
+cualquier reproductor (VLC, MX Player…). Mientras descarga aparece la notificación «Descargando…»
+y la descarga sigue a toda velocidad aunque apagues la pantalla.
 En Linux, dale permiso de ejecución al AppImage (`chmod +x Oval_*.AppImage`). Para que el óvalo
 se vea transparente hace falta un escritorio con compositor (GNOME, KDE y la mayoría lo tienen).
 
@@ -100,6 +101,8 @@ se vea transparente hace falta un escritorio con compositor (GNOME, KDE y la may
 | Grabar un directo | Pestaña **Directo**, pega el enlace y pulsa el botón rojo |
 | Terminar una grabación | Botón ■ (guarda) o × (descarta) |
 | Abrir el archivo | Clic en una descarga terminada |
+| Quitar de la lista | × en una descarga terminada (el archivo se queda) |
+| Borrar el archivo | 🗑 dos veces en una descarga terminada (va a la papelera en Windows y Linux) |
 | Cuenta completa | Pestaña **Canal**, pega el enlace y toca las miniaturas que no quieras |
 | Cambiar carpeta | Lápiz junto a la carpeta, abajo |
 | Cambiar tamaño | Tirador abajo a la derecha del óvalo |
