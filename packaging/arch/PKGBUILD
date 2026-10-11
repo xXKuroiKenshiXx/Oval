@@ -1,0 +1,22 @@
+# Arch Linux package of the release build (repackages the .deb).
+#   makepkg -si
+pkgname=oval-bin
+pkgver=0.2.0
+pkgrel=1
+pkgdesc="Minimal oval video downloader"
+arch=('x86_64')
+url="https://github.com/xXKuroiKenshiXx/Oval"
+license=('MIT')
+depends=('webkit2gtk-4.1' 'gtk3' 'libsoup3' 'hicolor-icon-theme')
+optdepends=('ffmpeg: used instead of downloading a copy'
+            'deno: JavaScript runtime for YouTube, used instead of downloading a copy')
+provides=('oval')
+conflicts=('oval')
+options=('!strip' '!debug')
+source=("https://github.com/xXKuroiKenshiXx/Oval/releases/download/v${pkgver}/Oval_${pkgver}_amd64.deb")
+sha256sums=('SKIP')
+
+package() {
+  tar -xf data.tar.* -C "$pkgdir"
+  chmod 755 "$pkgdir/usr/bin/oval"
+}

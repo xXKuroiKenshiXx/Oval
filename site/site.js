@@ -10,7 +10,11 @@
     windows: (n) => /setup\.exe$/i.test(n),
     portable: (n) => /portable\.exe$/i.test(n),
     appimage: (n) => /\.AppImage$/i.test(n),
+    flatpak: (n) => /\.flatpak$/i.test(n),
     deb: (n) => /\.deb$/i.test(n),
+    rpm: (n) => /\.rpm$/i.test(n),
+    arch: (n) => /\.pkg\.tar\.zst$/i.test(n),
+    void: (n) => /\.xbps$/i.test(n),
     apk: (n) => /\.apk$/i.test(n),
   };
 

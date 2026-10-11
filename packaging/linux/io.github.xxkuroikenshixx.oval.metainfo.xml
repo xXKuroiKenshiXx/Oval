@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.xxkuroikenshixx.oval</id>
+  <name>Oval</name>
+  <summary>Minimal oval video downloader</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <developer id="io.github.xxkuroikenshixx">
+    <name>xXKuroiKenshiXx</name>
+  </developer>
+  <description>
+    <p>
+      Paste a link and download. Oval is a round, borderless downloader for single videos,
+      whole channels (pick which videos with a tap) and live streams recorded in real time,
+      from YouTube, X, Instagram, TikTok, Twitch, Kick and more than a thousand other sites.
+    </p>
+  </description>
+  <launchable type="desktop-id">io.github.xxkuroikenshixx.oval.desktop</launchable>
+  <url type="homepage">https://xxkuroikenshixx.github.io/Oval/</url>
+  <url type="vcs-browser">https://github.com/xXKuroiKenshiXx/Oval</url>
+  <url type="bugtracker">https://github.com/xXKuroiKenshiXx/Oval/issues</url>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="0.2.0" date="2026-10-11"/>
+    <release version="0.1.0" date="2026-10-10"/>
+  </releases>
+</component>

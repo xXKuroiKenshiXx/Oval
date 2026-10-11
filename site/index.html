@@ -36,21 +36,27 @@
 
   <main>
     <section class="video">
+      <h2 class="eyebrow">En acción</h2>
       <video src="demo.mp4" poster="poster.jpg" autoplay muted loop playsinline preload="metadata"
              aria-label="Grabación de Oval descargando vídeos, un canal y un directo"></video>
       <p class="caption">Grabación real de la app · películas abiertas de la Blender Foundation (CC BY) y directo de la NASA</p>
     </section>
 
-    <section class="try">
-      <div class="try-text">
-        <h2>Vista previa</h2>
-        <p>
-          Así se ve Oval por dentro. Pega un enlace, cambia de pestaña, pausa, graba un directo o
-          marca miniaturas en rojo.
-        </p>
+    <section class="try" id="demo">
+      <div class="try-head">
+        <span class="badge"><i aria-hidden="true"></i>Demo interactiva</span>
+        <h2>Pruébala aquí mismo</h2>
+        <p>Es la interfaz de Oval funcionando en tu navegador, con vídeos de ejemplo. Toca un paso o úsala directamente.</p>
       </div>
-      <div class="try-frame">
-        <iframe src="demo/" title="Demo interactiva de Oval" loading="lazy"></iframe>
+      <div class="stage">
+        <div class="try-frame">
+          <iframe src="demo/" title="Demo interactiva de Oval" loading="lazy"></iframe>
+        </div>
+        <div class="steps" role="group" aria-label="Recorrido por la demo">
+          <button type="button" data-step="link"><b>1</b>Pegar un enlace</button>
+          <button type="button" data-step="channel"><b>2</b>Elegir de un canal</button>
+          <button type="button" data-step="live"><b>3</b>Grabar un directo</button>
+        </div>
       </div>
     </section>
 
@@ -91,10 +97,22 @@
           <strong>Windows portable</strong><span>Un solo .exe, sin instalar</span>
         </a>
         <a class="dl" data-kind="appimage" href="https://github.com/xXKuroiKenshiXx/Oval/releases/latest">
-          <strong>Linux</strong><span>AppImage</span>
+          <strong>Linux</strong><span>AppImage · cualquier distro</span>
+        </a>
+        <a class="dl" data-kind="flatpak" href="https://github.com/xXKuroiKenshiXx/Oval/releases/latest">
+          <strong>Flatpak</strong><span>Cualquier distro con Flatpak</span>
         </a>
         <a class="dl" data-kind="deb" href="https://github.com/xXKuroiKenshiXx/Oval/releases/latest">
-          <strong>Debian / Ubuntu</strong><span>Paquete .deb</span>
+          <strong>Debian / Ubuntu</strong><span>Paquete .deb · Mint, Pop!_OS</span>
+        </a>
+        <a class="dl" data-kind="rpm" href="https://github.com/xXKuroiKenshiXx/Oval/releases/latest">
+          <strong>Fedora / openSUSE</strong><span>Paquete .rpm</span>
+        </a>
+        <a class="dl" data-kind="arch" href="https://github.com/xXKuroiKenshiXx/Oval/releases/latest">
+          <strong>Arch Linux</strong><span>Paquete pacman · Manjaro, EndeavourOS</span>
+        </a>
+        <a class="dl" data-kind="void" href="https://github.com/xXKuroiKenshiXx/Oval/releases/latest">
+          <strong>Void Linux</strong><span>Paquete .xbps</span>
         </a>
         <a class="dl" data-kind="apk" href="https://github.com/xXKuroiKenshiXx/Oval/releases/latest">
           <strong>Android</strong><span>APK · Android 7 o superior</span>
@@ -127,5 +145,6 @@
   </footer>
 
   <script src="site.js"></script>
+  <script src="tour.js"></script>
 </body>
 </html>

@@ -1,0 +1,37 @@
+# Flatpak of the release build: repackages the .deb that the release workflow
+# makes (copied next to this file as oval.deb), the way Tauri apps ship on Flatpak.
+id: io.github.xxkuroikenshixx.oval
+runtime: org.gnome.Platform
+runtime-version: "50"
+sdk: org.gnome.Sdk
+command: oval
+finish-args:
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --share=ipc
+  - --device=dri
+  # Downloads, live recordings and the yt-dlp/FFmpeg engine all need the network.
+  - --share=network
+  # Saves to ~/Downloads/Oval by default, or any folder picked in the app.
+  - --filesystem=home
+  - --talk-name=org.freedesktop.FileManager1
+modules:
+  - name: oval
+    buildsystem: simple
+    sources:
+      - type: file
+        path: oval.deb
+      - type: file
+        path: ../linux/io.github.xxkuroikenshixx.oval.metainfo.xml
+    build-commands:
+      - ar -x oval.deb
+      - tar -xf data.tar.*
+      - install -Dm755 usr/bin/oval /app/bin/oval
+      - install -Dm644 usr/share/applications/Oval.desktop /app/share/applications/io.github.xxkuroikenshixx.oval.desktop
+      - desktop-file-edit --set-icon=io.github.xxkuroikenshixx.oval /app/share/applications/io.github.xxkuroikenshixx.oval.desktop
+      - |
+        for size in 32x32 128x128 512x512; do
+          install -Dm644 "usr/share/icons/hicolor/$size/apps/oval.png" \
+            "/app/share/icons/hicolor/$size/apps/io.github.xxkuroikenshixx.oval.png"
+        done
+      - install -Dm644 io.github.xxkuroikenshixx.oval.metainfo.xml /app/share/metainfo/io.github.xxkuroikenshixx.oval.metainfo.xml

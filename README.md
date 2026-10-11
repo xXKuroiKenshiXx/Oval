@@ -65,8 +65,22 @@ Ve a [Releases](https://github.com/xXKuroiKenshiXx/Oval/releases):
 | Sistema | Archivo |
 | --- | --- |
 | Windows 10/11 | `Oval_x.y.z_x64-setup.exe` (instalador) o `Oval-x.y.z-portable.exe` |
-| Linux | `Oval_x.y.z_amd64.AppImage` o `Oval_x.y.z_amd64.deb` |
+| Linux (cualquier distro) | `Oval_x.y.z_amd64.AppImage` o `Oval_x.y.z_x86_64.flatpak` |
+| Debian, Ubuntu, Mint | `Oval_x.y.z_amd64.deb` |
+| Fedora, openSUSE | `Oval-x.y.z-1.x86_64.rpm` |
+| Arch, Manjaro, EndeavourOS | `oval-bin-x.y.z-1-x86_64.pkg.tar.zst` |
+| Void Linux | `oval-x.y.z_1.x86_64.xbps` |
 | Android 7+ | `Oval_x.y.z_android.apk` (permite instalar apps de fuera de Play Store) |
+
+Cómo instalar cada paquete de Linux, desde la carpeta donde lo descargaste:
+
+```bash
+flatpak install --user Oval_*.flatpak          # Flatpak
+sudo apt install ./Oval_*_amd64.deb            # Debian, Ubuntu, Mint
+sudo dnf install ./Oval-*.x86_64.rpm           # Fedora (openSUSE: sudo zypper install)
+sudo pacman -U oval-bin-*.pkg.tar.zst          # Arch
+xbps-rindex -a oval-*.xbps && sudo xbps-install --repository="$PWD" oval   # Void
+```
 
 En Windows hace falta WebView2 (viene con Windows 11; el instalador lo añade si falta).
 En Android las descargas van a `Descargas/Oval`; los directos se guardan en `.ts`, que abre
@@ -150,8 +164,9 @@ cargo install tauri-cli --version "^2" --locked
 cargo tauri build
 ```
 
-En Linux usa `cargo tauri build --bundles appimage,deb`. Los paquetes quedan en
-`target/release/bundle/`.
+En Linux usa `cargo tauri build --bundles appimage,deb,rpm`. Los paquetes quedan en
+`target/release/bundle/`. Las recetas del Flatpak, Arch y Void están en `packaging/` y reempaquetan
+el `.deb`.
 
 Para Android hacen falta JDK 17, el SDK (plataforma 37) y el NDK 27; el proyecto ya está en
 `gen/android`:
@@ -178,13 +193,14 @@ plugins/oval-engine/   puente con youtubedl-android (Kotlin)
 gen/android/     proyecto de Android
 ui/              HTML, CSS y JS de la interfaz, sin dependencias
 site/            página web (GitHub Pages) con la demo interactiva
+packaging/       Flatpak, Arch (PKGBUILD), Void y metadatos de Linux
 ```
 
 ### Publicar una versión
 
 Sube la versión en `Cargo.toml` y `tauri.conf.json`, anota los cambios en `CHANGELOG.md` y empuja
-una etiqueta `vX.Y.Z`. GitHub Actions compila Windows, Linux y Android y publica todos los
-archivos. La APK solo se firma si el repositorio tiene los secretos `ANDROID_KEYSTORE_B64` y
+una etiqueta `vX.Y.Z`. GitHub Actions compila Windows, Linux (AppImage, .deb, .rpm, Flatpak,
+Arch y Void) y Android y publica todos los archivos. La APK solo se firma si el repositorio tiene los secretos `ANDROID_KEYSTORE_B64` y
 `ANDROID_KEYSTORE_PASSWORD`. La página web se publica sola en cada cambio de `site/` o `ui/`.
 
 ## Aviso

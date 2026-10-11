@@ -123,10 +123,14 @@ pub fn kill_tree(pid: u32) {
     }
     #[cfg(not(windows))]
     {
-        // Negative pid = the whole process group set up in `prepare`.
-        let _ = Command::new("kill")
-            .args(["-KILL", "--", &format!("-{pid}")])
-            .status();
+        // Negative pid = the whole process group set up in `prepare`. A syscall
+        // rather than the `kill` program, which minimal runtimes (Flatpak) may lack.
+        if let Ok(pgid) = libc::pid_t::try_from(pid) {
+            // SAFETY: plain kill(2) on a process group Oval created.
+            unsafe {
+                libc::kill(-pgid, libc::SIGKILL);
+            }
+        }
     }
 }
 

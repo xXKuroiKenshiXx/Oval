@@ -13,7 +13,7 @@ out = root / "_site"
 shutil.rmtree(out, ignore_errors=True)
 (out / "demo").mkdir(parents=True)
 
-for name in ("index.html", "site.css", "site.js"):
+for name in ("index.html", "site.css", "site.js", "tour.js"):
     shutil.copy(root / "site" / name, out / name)
 shutil.copy(root / "icons" / "icon.png", out / "icon.png")
 shutil.copy(root / "docs" / "demo.mp4", out / "demo.mp4")

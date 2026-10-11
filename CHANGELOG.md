@@ -2,7 +2,11 @@
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-11
+
 ### Added
+- Paquetes para más sistemas Linux: Flatpak, .rpm (Fedora, openSUSE), Arch Linux y Void Linux.
+- La APK de Android se compila y firma en GitHub Actions junto con el resto.
 - Canal: los vídeos que quedaron a medias (descarga cortada o app cerrada) se marcan con borde
   punteado amarillo y siguen desde donde iban.
 - Canal: los archivos sin `[id]` en el nombre también cuentan como descargados si el título coincide.
@@ -11,6 +15,7 @@
 - Canal: las miniaturas ya descargadas se marcan en amarillo mientras carga la lista, y al terminar
   una descarga su miniatura pasa a amarillo.
 - Canal: «Todos» ya no vuelve a seleccionar lo que ya está descargado.
+- Web: la demo interactiva se distingue mejor y tiene un recorrido de tres pasos.
 
 ## [0.1.0] - 2026-10-10
 

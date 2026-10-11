@@ -50,14 +50,68 @@ jobs:
       - name: Test
         run: cargo test --locked
       - name: Build
-        run: npx --yes @tauri-apps/cli@2 build --bundles appimage,deb
+        run: npx --yes @tauri-apps/cli@2 build --bundles appimage,deb,rpm
       - name: Collect
         run: |
           mkdir dist
-          cp target/release/bundle/appimage/*.AppImage target/release/bundle/deb/*.deb dist/
+          cp target/release/bundle/appimage/*.AppImage target/release/bundle/deb/*.deb             target/release/bundle/rpm/*.rpm dist/
       - uses: actions/upload-artifact@v4
         with:
           name: linux
+          path: dist/*
+
+  # Flatpak, Void and Arch packages repackage the .deb built above.
+  flatpak:
+    needs: linux
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/flathub-infra/flatpak-github-actions:gnome-50
+      options: --privileged
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: linux
+          path: linux
+      - name: Build
+        run: |
+          cp linux/*.deb packaging/flatpak/oval.deb
+          flatpak-builder --user --install-deps-from=flathub --repo=repo --force-clean             build packaging/flatpak/io.github.xxkuroikenshixx.oval.yml
+          mkdir dist
+          flatpak build-bundle --runtime-repo=https://dl.flathub.org/repo/flathub.flatpakrepo             repo "dist/Oval_${GITHUB_REF_NAME#v}_x86_64.flatpak" io.github.xxkuroikenshixx.oval
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flatpak
+          path: dist/*
+
+  distros:
+    needs: linux
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: linux
+          path: linux
+      - name: Void Linux
+        run: |
+          mkdir -p dist
+          docker run --rm -v "$PWD:/w" ghcr.io/void-linux/void-glibc-full:latest             sh /w/packaging/void/build.sh /w/linux/Oval_${GITHUB_REF_NAME#v}_amd64.deb "${GITHUB_REF_NAME#v}" /w/dist
+      - name: Arch Linux
+        run: |
+          docker run --rm -v "$PWD:/w" -e VERSION="${GITHUB_REF_NAME#v}" archlinux:latest bash -c '
+            set -e
+            pacman -Syu --noconfirm --needed base-devel > /dev/null
+            useradd -m builder
+            cp -r /w/packaging/arch /home/builder/pkg
+            cp /w/linux/*.deb /home/builder/pkg/
+            sed -i "s/^pkgver=.*/pkgver=$VERSION/" /home/builder/pkg/PKGBUILD
+            chown -R builder /home/builder/pkg
+            su builder -c "cd /home/builder/pkg && makepkg --nodeps"
+            cp /home/builder/pkg/*.pkg.tar.zst /w/dist/'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: distros
           path: dist/*
 
   android:
@@ -110,7 +164,7 @@ jobs:
           path: dist/*
 
   publish:
-    needs: [windows, linux, android]
+    needs: [windows, linux, flatpak, distros, android]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
