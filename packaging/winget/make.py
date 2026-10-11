@@ -31,7 +31,7 @@ PackageVersion: {version}
 DefaultLocale: en-US
 ManifestType: version
 ManifestVersion: {SCHEMA}
-""", encoding="utf-8")
+""", encoding="utf-8", newline="\n")
 
 (out / f"{ID}.installer.yaml").write_text(head("installer") + f"""PackageIdentifier: {ID}
 PackageVersion: {version}
@@ -47,7 +47,7 @@ Installers:
   InstallerSha256: {sha}
 ManifestType: installer
 ManifestVersion: {SCHEMA}
-""", encoding="utf-8")
+""", encoding="utf-8", newline="\n")
 
 (out / f"{ID}.locale.en-US.yaml").write_text(head("defaultLocale") + f"""PackageIdentifier: {ID}
 PackageVersion: {version}
@@ -74,5 +74,5 @@ Tags:
 ReleaseNotesUrl: {REPO}/releases/tag/v{version}
 ManifestType: defaultLocale
 ManifestVersion: {SCHEMA}
-""", encoding="utf-8")
+""", encoding="utf-8", newline="\n")
 print(out, sha)
