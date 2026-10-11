@@ -1,0 +1,48 @@
+[package]
+name = "oval"
+version = "0.1.0"
+description = "Minimal oval video downloader"
+authors = ["xXKuroiKenshiXx"]
+license = "MIT"
+repository = "https://github.com/xXKuroiKenshiXx/Oval"
+edition = "2021"
+rust-version = "1.80"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["process", "io-util", "sync", "time", "fs", "macros"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream", "json"] }
+futures-util = "0.3"
+zip = { version = "2", default-features = false, features = ["deflate"] }
+dirs = "6"
+arboard = { version = "3", default-features = false }
+tauri-plugin-dialog = "2"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+tar = "0.4"
+lzma-rs = "0.3"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_System_JobObjects",
+    "Win32_System_Threading",
+] }
+
+[features]
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true

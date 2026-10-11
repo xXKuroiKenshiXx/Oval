@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Oval</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main class="oval" id="oval" data-tauri-drag-region>
+    <!-- Everything is laid out on a 672px circle and scaled to the window. -->
+    <div class="stage" id="stage" data-tauri-drag-region>
+      <header class="bar" data-tauri-drag-region>
+        <button class="dot" id="min" aria-label="Minimizar" title="Minimizar">
+          <svg viewBox="0 0 12 12"><path d="M3 6h6"/></svg>
+        </button>
+        <div class="brand" id="brand" data-tauri-drag-region title="Doble clic: tamaño original">oval</div>
+        <button class="dot close" id="close" aria-label="Cerrar" title="Cerrar">
+          <svg viewBox="0 0 12 12"><path d="M3.5 3.5l5 5M8.5 3.5l-5 5"/></svg>
+        </button>
+      </header>
+
+      <nav class="tabs" role="tablist" data-on="link">
+        <span class="tabs-glider" aria-hidden="true"></span>
+        <button role="tab" data-tab="link" class="on">Enlace</button>
+        <button role="tab" data-tab="channel">Canal</button>
+        <button role="tab" data-tab="live">Directo</button>
+      </nav>
+
+      <!-- Single link -->
+      <section class="view on" id="view-link" data-tauri-drag-region>
+        <form class="pill" id="link-form" autocomplete="off">
+          <button type="button" class="pill-icon" id="paste" title="Pegar del portapapeles" aria-label="Pegar">
+            <svg viewBox="0 0 24 24"><rect x="7" y="4" width="10" height="4" rx="2"/><path d="M8 6H7a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-1"/></svg>
+          </button>
+          <input id="url" type="text" placeholder="Pega un enlace y descarga" spellcheck="false">
+          <button type="submit" class="go" aria-label="Descargar" title="Descargar">
+            <svg viewBox="0 0 24 24"><path d="M12 5v11M7 11.5l5 5 5-5M7 20h10"/></svg>
+          </button>
+        </form>
+
+        <div class="opts" data-tauri-drag-region>
+          <div class="seg mode" role="group" aria-label="Formato">
+            <button type="button" data-mode="video" class="on">MP4</button>
+            <button type="button" data-mode="audio">MP3</button>
+          </div>
+          <button type="button" class="qchip" data-ctx="link" aria-haspopup="menu" title="Calidad">
+            <span class="qlabel">Máx</span>
+            <svg viewBox="0 0 24 24"><path d="M8 10l4 4 4-4"/></svg>
+          </button>
+        </div>
+
+        <div class="queue" id="queue" data-tauri-drag-region>
+          <div class="empty" data-tauri-drag-region>
+            <div class="engine" hidden>
+              <span class="engine-ring"></span><span class="engine-text">Preparando motor</span>
+            </div>
+            <p>YouTube · Twitch · X · Instagram · TikTok · Facebook · y mil más</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- Whole account: channel, profile or playlist -->
+      <section class="view" id="view-channel" data-tauri-drag-region>
+        <form class="pill" id="channel-form" autocomplete="off">
+          <span class="pill-icon static" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><rect x="4" y="4" width="7" height="7" rx="2"/><rect x="13" y="4" width="7" height="7" rx="2"/><rect x="4" y="13" width="7" height="7" rx="2"/><rect x="13" y="13" width="7" height="7" rx="2"/></svg>
+          </span>
+          <input id="channel-url" type="text" placeholder="Canal, perfil o playlist (YouTube, TikTok…)" spellcheck="false">
+          <button type="submit" class="go" id="channel-go" aria-label="Cargar vídeos" title="Cargar vídeos">
+            <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6"/><path d="M20 20l-4.2-4.2"/></svg>
+          </button>
+        </form>
+
+        <div class="ctools" data-tauri-drag-region>
+          <div class="seg small" id="ctabs" role="group" aria-label="Sección del canal">
+            <button type="button" data-ctab="videos" class="on">Vídeos</button>
+            <button type="button" data-ctab="shorts">Shorts</button>
+            <button type="button" data-ctab="streams">Directos</button>
+          </div>
+          <span class="ccount" id="ccount"></span>
+          <div class="seg small" role="group" aria-label="Selección">
+            <button type="button" id="all">Todos</button>
+            <button type="button" id="none">Ninguno</button>
+          </div>
+        </div>
+
+        <div class="grid-wrap">
+          <div class="grid" id="grid" data-tauri-drag-region></div>
+          <div class="grid-hint" data-tauri-drag-region>
+            <p>Carga una cuenta y toca las miniaturas que <b class="red">no</b> quieras.</p>
+          </div>
+        </div>
+
+        <footer class="foot" data-tauri-drag-region>
+          <div class="seg mode" role="group" aria-label="Formato">
+            <button type="button" data-mode="video" class="on">MP4</button>
+            <button type="button" data-mode="audio">MP3</button>
+          </div>
+          <button type="button" class="qchip" data-ctx="channel" aria-haspopup="menu" title="Calidad">
+            <span class="qlabel">Máx</span>
+            <svg viewBox="0 0 24 24"><path d="M8 10l4 4 4-4"/></svg>
+          </button>
+          <button class="cta" id="cdownload" disabled>
+            <svg viewBox="0 0 24 24"><path d="M12 5v11M7 11.5l5 5 5-5M7 20h10"/></svg>
+            <span>Descargar <b id="csel">0</b></span>
+          </button>
+        </footer>
+      </section>
+
+      <!-- Live recording -->
+      <section class="view" id="view-live" data-tauri-drag-region>
+        <form class="pill" id="live-form" autocomplete="off">
+          <span class="pill-icon static live-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="2.2"/><path d="M8.2 15.8a5.4 5.4 0 0 1 0-7.6M15.8 8.2a5.4 5.4 0 0 1 0 7.6M5.4 18.6a9.3 9.3 0 0 1 0-13.2M18.6 5.4a9.3 9.3 0 0 1 0 13.2"/></svg>
+          </span>
+          <input id="live-url" type="text" placeholder="Directo de Twitch, Kick, YouTube, TikTok…" spellcheck="false">
+          <button type="submit" class="go rec" aria-label="Grabar" title="Grabar en tiempo real">
+            <span class="rec-dot"></span>
+          </button>
+        </form>
+
+        <div class="opts" data-tauri-drag-region>
+          <button type="button" class="qchip" data-ctx="live" aria-haspopup="menu" title="Calidad">
+            <span class="qlabel">Máx</span>
+            <svg viewBox="0 0 24 24"><path d="M8 10l4 4 4-4"/></svg>
+          </button>
+          <span class="opts-note">Se guarda en MP4 al detener</span>
+        </div>
+
+        <div class="queue" id="live-queue" data-tauri-drag-region>
+          <div class="empty" data-tauri-drag-region>
+            <div class="engine" hidden>
+              <span class="engine-ring"></span><span class="engine-text">Preparando motor</span>
+            </div>
+            <p>Graba en tiempo real. Detén cuando quieras y queda guardado.</p>
+          </div>
+        </div>
+      </section>
+
+      <footer class="foot" id="foot-main" data-tauri-drag-region>
+        <div class="split">
+          <button class="chip" id="folder" title="Abrir carpeta de descargas">
+            <svg viewBox="0 0 24 24"><path d="M3 7.5A2.5 2.5 0 0 1 5.5 5h3.6l2 2h7.4A2.5 2.5 0 0 1 21 9.5v7a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 16.5z"/></svg>
+            <span id="folder-name">Oval</span>
+          </button>
+          <button class="chip-end" id="folder-change" title="Cambiar dónde se guarda" aria-label="Cambiar carpeta">
+            <svg viewBox="0 0 24 24"><path d="M14.5 5.5l4 4M4 20l1-4.5L15.8 4.7a1.8 1.8 0 0 1 2.5 0l1 1a1.8 1.8 0 0 1 0 2.5L8.5 19z"/></svg>
+          </button>
+        </div>
+        <button class="chip round" id="clear" title="Quitar completadas" aria-label="Quitar completadas" hidden>
+          <svg viewBox="0 0 24 24"><path d="M3.5 12.5l4 4 8-9M12.5 15.5l1 1 8-9"/></svg>
+        </button>
+        <div class="stepper" title="Descargas simultáneas (los directos no cuentan)">
+          <button id="less" aria-label="Menos">−</button>
+          <span id="conc">3</span>
+          <button id="more" aria-label="Más">+</button>
+          <em>a la vez</em>
+        </div>
+      </footer>
+
+      <div class="menu" id="qmenu" role="menu" hidden></div>
+      <div class="toast" id="toast" role="status"></div>
+    </div>
+
+    <button class="grip" id="grip" aria-label="Cambiar tamaño" title="Arrastra para cambiar el tamaño">
+      <svg viewBox="0 0 16 16"><path d="M5 12.5L12.5 5M9 12.8l3.8-3.8"/></svg>
+    </button>
+  </main>
+
+  <template id="item-tpl">
+    <div class="item">
+      <div class="ring"><img alt="" referrerpolicy="no-referrer" draggable="false"><span class="ring-badge"></span></div>
+      <div class="info">
+        <div class="title"></div>
+        <div class="meta"></div>
+      </div>
+      <div class="acts">
+        <button class="act toggle" title="Pausar"></button>
+        <button class="act stop" title="Cancelar">
+          <svg viewBox="0 0 24 24"><path d="M8 8l8 8M16 8l-8 8"/></svg>
+        </button>
+      </div>
+    </div>
+  </template>
+
+  <script src="app.js"></script>
+</body>
+</html>
