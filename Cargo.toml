@@ -1,6 +1,6 @@
 [package]
 name = "oval"
-version = "0.3.0"
+version = "0.4.0"
 description = "Minimal oval video downloader"
 authors = ["xXKuroiKenshiXx"]
 license = "MIT"

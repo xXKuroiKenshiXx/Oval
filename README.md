@@ -28,14 +28,14 @@
 
 Tres pestañas, una para cada caso:
 
-- **Enlace**: un vídeo de YouTube, X/Twitter, Instagram, TikTok, Facebook, Vimeo, Reddit o
+- **Enlace**: un vídeo de YouTube, Kick (videos grabados y clips), X/Twitter, Instagram, TikTok, Facebook, Vimeo, Reddit o
   [cualquiera de los más de mil sitios compatibles](https://github.com/yt-dlp/yt-dlp/blob/master/supportedsites.md).
 - **Canal**: una cuenta entera (canal de YouTube, perfil de TikTok, playlist…). Aparecen todas las
   miniaturas; toca las que **no** quieras y se marcan en rojo. `Shift` + clic marca un rango.
   Busca por título dentro del canal, y lo que ya tienes en la carpeta sale **en amarillo** (y queda
   fuera salvo que lo toques), aunque lo hayas bajado en otra sesión. Lo que quedó a medias porque
   se cortó o cerraste la app sale con borde punteado y sigue desde donde iba. En YouTube eliges
-  entre Vídeos, Shorts y Directos.
+  entre Vídeos, Shorts y Directos; en Kick y Twitch, entre Vídeos grabados y Clips.
 - **Directo**: graba en tiempo real un directo de Twitch, Kick, YouTube, TikTok y otros. Detén
   cuando quieras y queda guardado en MP4. Si se corta la conexión, lo grabado no se pierde.
 
@@ -43,6 +43,8 @@ Y además:
 
 - **Sin preguntas**: no hay diálogo de "guardar como". Todo va a `Descargas/Oval`
   (cámbialo con el lápiz junto a la carpeta y se recuerda).
+  Al terminar, cada archivo queda en una carpeta con su mismo nombre:
+  `Oval/elpepe/elpepe.mp4`; en Canal, `Oval/Canal/elpepe/elpepe.mp4`.
 - **Rápido**: fragmentos en paralelo, motor precargado al abrir y arranque casi instantáneo.
 - **Tiempo estimado, velocidad y tamaño** de cada descarga en vivo.
 - **Pausar, reanudar y cancelar**. Al reanudar continúa donde se quedó; al cancelar borra los

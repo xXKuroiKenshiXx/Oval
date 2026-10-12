@@ -157,6 +157,20 @@ svg {
   text-transform: lowercase;
 }
 
+.version {
+  position: absolute;
+  bottom: 28px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-family: var(--font);
+  font-size: 10px;
+  font-weight: 400;
+  letter-spacing: 0;
+  text-indent: 0;
+  color: var(--text-2);
+  white-space: nowrap;
+}
+
 .dot {
   width: 22px;
   height: 22px;
@@ -650,12 +664,12 @@ button.pill-icon:hover { background: var(--surface-2); color: var(--text); }
   height: 30px;
   padding: 0 11px 0 10px;
   border-radius: 999px;
-  background: var(--surface);
-  box-shadow: inset 0 0 0 1px var(--line);
+  background: rgba(125, 115, 255, 0.16);
+  box-shadow: inset 0 0 0 1px rgba(145, 135, 255, 0.45);
   transition: box-shadow 0.2s, background 0.2s;
 }
-.csearch:focus-within { background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--line-2), 0 0 0 3px var(--mint-soft); }
-.csearch svg { flex: none; width: 14px; height: 14px; color: var(--text-3); }
+.csearch:focus-within { background: rgba(125, 115, 255, 0.24); box-shadow: inset 0 0 0 1px rgba(145, 135, 255, 0.75), 0 0 0 3px rgba(125, 115, 255, 0.16); }
+.csearch svg { flex: none; width: 14px; height: 14px; color: var(--text-2); }
 .csearch input {
   flex: 1;
   min-width: 0;
@@ -671,7 +685,7 @@ button.pill-icon:hover { background: var(--surface-2); color: var(--text); }
 .csearch input::-webkit-search-cancel-button { display: none; }
 .csearch .ccount { flex: none; font-size: 11px; }
 
-/* Vídeos / Shorts / Directos only mean something on YouTube. */
+/* Hide collection sections on sites without channel tabs. */
 .ctools.other #ctabs { visibility: hidden; }
 
 .grid-wrap {
@@ -1025,6 +1039,7 @@ html.mobile .title { font-size: 13px; }
 html.mobile .meta { font-size: 11px; }
 html.mobile .act { width: 32px; height: 32px; }
 html.mobile .foot { bottom: 56px; gap: 8px; }
+html.mobile .version { bottom: 26px; }
 html.mobile .ctools { width: calc(100% - 28px); flex-wrap: wrap; justify-content: center; gap: 8px; }
 html.mobile .ctools .csearch { order: -1; width: 100%; }
 html.mobile .grid-wrap { width: calc(100% - 12px); }

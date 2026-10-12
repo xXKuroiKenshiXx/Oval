@@ -19,6 +19,13 @@ jobs:
           node-version: 22
       - name: Test
         run: cargo test --locked
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Kick extractor tests
+        run: |
+          python -m pip install yt-dlp==2026.08.19
+          python -m unittest discover -s tests -p test_kick_channel.py
       - name: Build
         run: npx --yes @tauri-apps/cli@2 build
       - name: Collect
@@ -49,6 +56,13 @@ jobs:
           node-version: 22
       - name: Test
         run: cargo test --locked
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Kick extractor tests
+        run: |
+          python -m pip install yt-dlp==2026.08.19
+          python -m unittest discover -s tests -p test_kick_channel.py
       - name: Build
         run: npx --yes @tauri-apps/cli@2 build --bundles appimage,deb,rpm
       - name: Collect
@@ -125,6 +139,12 @@ jobs:
       KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
     steps:
       - uses: actions/checkout@v4
+      - name: Require Android signing key
+        run: |
+          test -n "$KEYSTORE_B64" && test -n "$KEYSTORE_PASSWORD" || {
+            echo "Android signing secrets are missing; refusing to publish a release without its APK."
+            exit 1
+          }
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -161,6 +181,8 @@ jobs:
           mkdir dist
           cp gen/android/app/build/outputs/apk/universal/release/app-universal-release.apk \
             "dist/Oval_${GITHUB_REF_NAME#v}_android.apk"
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose \
+            "dist/Oval_${GITHUB_REF_NAME#v}_android.apk"
       - uses: actions/upload-artifact@v4
         if: env.KEYSTORE_B64 != ''
         with:
@@ -181,6 +203,14 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           version="${GITHUB_REF_NAME#v}"
+          for file in \
+            "Oval-${version}-portable.exe" "Oval_${version}_x64-setup.exe" \
+            "Oval_${version}_amd64.AppImage" "Oval_${version}_amd64.deb" \
+            "Oval-${version}-1.x86_64.rpm" "Oval_${version}_x86_64.flatpak" \
+            "oval-bin-${version}-1-x86_64.pkg.tar.zst" "oval-${version}_1.x86_64.xbps" \
+            "Oval_${version}_android.apk"; do
+            test -s "dist/$file" || { echo "Missing release asset: $file"; exit 1; }
+          done
           notes=$(awk -v v="$version" 'index($0, "## [" v "]") == 1 {f=1; next} /^## / {f=0} f' CHANGELOG.md)
           # A release may already exist (published by hand with a signed APK);
           # then just add or refresh the files built here.

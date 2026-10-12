@@ -71,6 +71,18 @@ pub fn cancel(app: &AppHandle) {
 /// chosen tab is appended (or swapped in) for YouTube channel URLs.
 pub fn normalize(url: &str, tab: &str) -> String {
     let url = url.trim().trim_end_matches('/');
+    if let Some((host, name)) = streaming_channel(url) {
+        return match host {
+            "kick.com" => format!(
+                "https://kick.com/{name}/{}",
+                if tab == "clips" { "clips" } else { "videos" }
+            ),
+            _ if tab == "clips" => {
+                format!("https://www.twitch.tv/{name}/clips?filter=clips&range=all")
+            }
+            _ => format!("https://www.twitch.tv/{name}/videos?filter=all&sort=time"),
+        };
+    }
     let lower = url.to_ascii_lowercase();
     let is_channel = lower.contains("youtube.com/")
         && !lower.contains("list=")
@@ -104,6 +116,49 @@ pub fn normalize(url: &str, tab: &str) -> String {
     format!("{base}/{tab}")
 }
 
+/// Accept channel pages, but never an individual video or clip URL.
+fn streaming_channel(url: &str) -> Option<(&'static str, &str)> {
+    let (_, rest) = url.split_once("://")?;
+    let (host, path) = rest.split_once('/')?;
+    let host = host.to_ascii_lowercase();
+    let host = host
+        .strip_prefix("www.")
+        .or_else(|| host.strip_prefix("m."))
+        .unwrap_or(&host);
+    let site = match host {
+        "kick.com" => "kick.com",
+        "twitch.tv" => "twitch.tv",
+        _ => return None,
+    };
+    if url
+        .split_once('?')
+        .is_some_and(|(_, query)| query.split('&').any(|p| p.starts_with("clip=")))
+    {
+        return None;
+    }
+    let path = path.split(['?', '#']).next()?.trim_end_matches('/');
+    let mut pieces = path.split('/');
+    let name = pieces.next()?;
+    if name.is_empty()
+        || !name
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-'))
+        || matches!(
+            name,
+            "videos" | "clips" | "categories" | "directory" | "search" | "auth" | "collections"
+        )
+    {
+        return None;
+    }
+    let section = pieces.next();
+    if pieces.next().is_some()
+        || section.is_some_and(|s| !matches!(s, "videos" | "clips" | "profile"))
+    {
+        return None;
+    }
+    Some((site, name))
+}
+
 /// `token` comes from the UI and is echoed in every batch so it can drop
 /// entries that belong to an older listing.
 pub async fn list(app: &AppHandle, url: &str, tab: &str, token: u64) -> Result<Summary, String> {
@@ -134,7 +189,7 @@ pub async fn list(app: &AppHandle, url: &str, tab: &str, token: u64) -> Result<S
     }
 
     let youtube = url.contains("youtube.com") || url.contains("youtu.be");
-    let mut channel: Option<String> = None;
+    let mut channel = streaming_channel(&url).map(|(_, name)| name.to_string());
     let mut pending = Vec::new();
     let mut count = 0usize;
     let mut missing = 0usize;
@@ -317,7 +372,7 @@ fn parse_entry(v: &Value, youtube: bool) -> Option<Entry> {
 
 #[cfg(test)]
 mod tests {
-    use super::normalize;
+    use super::{normalize, parse_entry, streaming_channel};
 
     #[test]
     fn channel_urls_get_a_tab() {
@@ -333,5 +388,49 @@ mod tests {
             normalize("https://www.youtube.com/playlist?list=PL1", "videos"),
             "https://www.youtube.com/playlist?list=PL1"
         );
+    }
+
+    #[test]
+    fn streaming_channels_list_archives_and_clips() {
+        assert_eq!(
+            normalize("https://kick.com/lacobraaa/videos", "videos"),
+            "https://kick.com/lacobraaa/videos"
+        );
+        assert_eq!(
+            normalize("https://kick.com/lacobraaa/videos", "clips"),
+            "https://kick.com/lacobraaa/clips"
+        );
+        assert_eq!(
+            normalize("https://www.kick.com/lacobraaa", "videos"),
+            "https://kick.com/lacobraaa/videos"
+        );
+        assert_eq!(
+            normalize("https://www.twitch.tv/ibai", "videos"),
+            "https://www.twitch.tv/ibai/videos?filter=all&sort=time"
+        );
+        assert_eq!(
+            normalize("https://m.twitch.tv/ibai/videos?filter=all", "clips"),
+            "https://www.twitch.tv/ibai/clips?filter=clips&range=all"
+        );
+        assert!(streaming_channel(
+            "https://kick.com/lacobraaa/videos/1114e3e9-17a3-4308-9c26-990e1413ae17"
+        )
+        .is_none());
+        assert!(streaming_channel("https://kick.com/lacobraaa?clip=clip_123").is_none());
+        assert!(streaming_channel("https://kick.com.evil/lacobraaa/videos").is_none());
+        assert!(streaming_channel("https://www.twitch.tv/videos/12345").is_none());
+    }
+
+    #[test]
+    fn flat_streaming_entries_keep_download_links_and_thumbnails() {
+        let raw = serde_json::json!({
+            "id": "clip_123", "url": "https://kick.com/lacobraaa/clips/clip_123",
+            "title": "Clip", "duration": 17, "thumbnail": "https://clips.kick.com/thumbnail.webp"
+        });
+        let entry = parse_entry(&raw, false).unwrap();
+        assert_eq!(entry.id, "clip_123");
+        assert_eq!(entry.url, raw["url"].as_str().unwrap());
+        assert_eq!(entry.duration, Some(17.0));
+        assert_eq!(entry.thumbnail.as_deref(), raw["thumbnail"].as_str());
     }
 }

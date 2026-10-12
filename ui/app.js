@@ -116,6 +116,9 @@ function isCollection(url) {
     return /^\/(@[^/]+|channel\/|c\/|user\/)/.test(u.pathname) && !/\/(live|watch)\b/.test(u.pathname);
   }
   if (host === "tiktok.com") return /^\/@[^/]+\/?$/.test(u.pathname);
+  if (host === "kick.com" || host === "twitch.tv") {
+    return /^\/[\w-]+\/(videos|clips|profile)\/?$/.test(u.pathname) && !u.searchParams.has("clip");
+  }
   return false;
 }
 
@@ -125,7 +128,7 @@ function isLive(url) {
   const host = hostOf(url);
   const path = u.pathname.replace(/\/+$/, "");
   if (host === "twitch.tv") return /^\/[\w]+$/.test(path) && !/^\/(videos|directory|downloads|settings)$/.test(path);
-  if (host === "kick.com") return /^\/[\w-]+$/.test(path);
+  if (host === "kick.com") return /^\/[\w-]+$/.test(path) && !u.searchParams.has("clip") && !/^\/(categories|search|auth|videos|clips)$/.test(path);
   if (host === "youtube.com") return /\/live(\/|$)/.test(path);
   if (host === "tiktok.com") return /^\/@[^/]+\/live$/.test(path);
   if (host === "instagram.com") return /\/live$/.test(path);
@@ -444,12 +447,20 @@ async function addLinks(text) {
     toast("Es un directo: grabando");
     return true;
   }
-  for (const url of urls) await invoke("add_download", { url, mode, quality: currentQuality("link") });
+  for (const url of urls) {
+    if (isLive(url)) await startRecording(url);
+    else await invoke("add_download", { url, mode, quality: currentQuality("link") });
+  }
   if (urls.length > 1) toast(`${urls.length} descargas en cola`);
   return true;
 }
 
 async function startRecording(url) {
+  if (hostOf(url) === "kick.com" && !isLive(url)) {
+    setTab("link");
+    await invoke("add_download", { url, mode, quality: currentQuality("link") });
+    return;
+  }
   await invoke("add_live", { url, quality: currentQuality("live") });
 }
 
@@ -492,10 +503,25 @@ function renderCount() {
   $("#cdownload").disabled = sel === 0;
 }
 
-/** The Vídeos / Shorts / Directos switch only applies to YouTube. */
+/** Each platform has its own collection sections. */
 function syncChannelTools() {
   const url = normalizeUrl($("#channel-url").value);
-  $(".ctools").classList.toggle("other", !!url && !isYouTube(url));
+  const host = url ? hostOf(url) : "";
+  const streaming = host === "kick.com" || host === "twitch.tv";
+  const sections = streaming
+    ? [["videos", "Vídeos"], ["clips", "Clips"]]
+    : [["videos", "Vídeos"], ["shorts", "Shorts"], ["streams", "Directos"]];
+  const selected = $("#ctabs .on")?.dataset.ctab;
+  const active = sections.some(([key]) => key === selected) ? selected : "videos";
+  $$("#ctabs button").forEach((button, i) => {
+    button.hidden = !sections[i];
+    if (sections[i]) {
+      button.dataset.ctab = sections[i][0];
+      button.textContent = sections[i][1];
+    }
+    button.classList.toggle("on", !!sections[i] && sections[i][0] === active);
+  });
+  $(".ctools").classList.toggle("other", !!url && !isYouTube(url) && !streaming);
 }
 
 function tileFor(entry, i) {
@@ -546,8 +572,12 @@ async function loadChannel() {
   $("#channel-go").classList.add("busy");
   renderCount();
   // A pasted ".../streams" or ".../shorts" link picks that section.
-  const fromUrl = (new URL(url).pathname.match(/\/(videos|shorts|streams)\/?$/) || [])[1];
-  if (fromUrl) $$("#ctabs button").forEach((x) => x.classList.toggle("on", x.dataset.ctab === fromUrl));
+  const parsed = new URL(url);
+  const fromUrl = parsed.searchParams.get("filter") === "clips" ? "clips"
+    : (parsed.pathname.match(/\/(videos|shorts|streams|clips)\/?$/) || [])[1];
+  if (fromUrl && $("#ctabs button[data-ctab='" + fromUrl + "']:not([hidden])")) {
+    $$("#ctabs button").forEach((x) => x.classList.toggle("on", !x.hidden && x.dataset.ctab === fromUrl));
+  }
   const section = $("#ctabs .on").dataset.ctab;
   try {
     const summary = await invoke("list_channel", { url, tab: section, token });
@@ -726,6 +756,10 @@ async function downloadSelection() {
 /* ---------- Wiring ---------- */
 
 function wire() {
+  invoke("app_version").then((version) => {
+    $("#version").textContent = `v${version}`;
+    document.title = `Oval ${version}`;
+  }).catch(() => {});
   $("#min").addEventListener("click", () => appWindow.minimize());
   $("#close").addEventListener("click", () => appWindow.close());
   $("#brand").addEventListener("dblclick", () => appWindow.setSize(new LogicalSize(DEFAULT_SIZE, DEFAULT_SIZE)));
@@ -799,7 +833,17 @@ function wire() {
       $$("#ctabs button").forEach((x) => x.classList.toggle("on", x === b));
       const input = $("#channel-url");
       // Keep the field in sync so the URL's own section doesn't override the click.
-      input.value = input.value.trim().replace(/\/(videos|shorts|streams)\/?$/, `/${b.dataset.ctab}`);
+      const url = normalizeUrl(input.value);
+      if (url) {
+        const u = new URL(url);
+        u.pathname = u.pathname.replace(/\/(videos|shorts|streams|clips|profile)\/?$/, "");
+        if (["kick.com", "twitch.tv"].includes(hostOf(url)) || isYouTube(url)) {
+          u.pathname = u.pathname.replace(/\/$/, "") + `/${b.dataset.ctab}`;
+          u.searchParams.delete("filter");
+          u.searchParams.delete("range");
+          input.value = u.href;
+        }
+      }
       if (input.value) loadChannel();
     }),
   );

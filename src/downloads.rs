@@ -161,7 +161,8 @@ impl Queue {
             let mut next = self.next_id.lock().unwrap();
             for item in items {
                 *next += 1;
-                let url = item.url.trim().to_string();
+                let url = normalize_kick_url(item.url.trim());
+                let live = kick_live(&url).unwrap_or(live);
                 let job = Job {
                     id: *next,
                     title: item
@@ -493,7 +494,9 @@ async fn run_job(app: &AppHandle, id: u64, run: u64) -> Result<(), String> {
     .map(String::from)
     .to_vec();
     args.push("-P".into());
-    args.push(dir.display().to_string());
+    args.push(format!("home:{}", dir.display()));
+    args.push("-P".into());
+    args.push(format!("temp:{}", dir.display()));
     // "res:1080" = the best stream no taller than 1080p. H.264/AAC wins ties so
     // files open everywhere, editors included; above 1080p YouTube has no H.264.
     let sort = match &quality {
@@ -604,7 +607,10 @@ async fn run_job(app: &AppHandle, id: u64, run: u64) -> Result<(), String> {
                 .find(|j| j.id == id && j.run == run)
                 .and_then(|j| j.path.clone())
         };
-        path.and_then(|p| settle_file(&dir, Path::new(&p)))
+        Some(settle_file(
+            &dir,
+            Path::new(&path.ok_or("No se encontró el archivo descargado")?),
+        )?)
     } else {
         None
     };
@@ -675,11 +681,19 @@ async fn finish_recording(
     success: bool,
     error: Option<String>,
 ) -> Result<(), String> {
-    let (raw, stopping) = {
+    let (raw, stopping, dir) = {
         let q = queue(app);
         let jobs = q.jobs.lock().unwrap();
         match jobs.iter().find(|j| j.id == id && j.run == run) {
-            Some(j) => (j.raw.clone(), j.stopping),
+            Some(j) => (
+                j.path
+                    .as_ref()
+                    .map(PathBuf::from)
+                    .filter(|p| p.is_file())
+                    .or_else(|| j.raw.clone()),
+                j.stopping,
+                j.dir.clone(),
+            ),
             None => return Ok(()), // canceled
         }
     };
@@ -699,6 +713,7 @@ async fn finish_recording(
         tokio::time::sleep(Duration::from_millis(500)).await; // let Windows release the file
         finalize_recording(app, &raw).await
     };
+    let path = settle_file(&dir, &path)?;
     let size = std::fs::metadata(&path).map_or(0.0, |m| m.len() as f64);
     q.update_run(app, id, run, |j| {
         j.status = Status::Done;
@@ -825,7 +840,12 @@ fn handle_line(app: &AppHandle, id: u64, run: u64, live: bool, line: &str) {
                 .file_stem()
                 .map(|s| s.to_string_lossy().into_owned());
             if j.live && !file.is_empty() {
-                j.raw = Some(PathBuf::from(file));
+                let path = PathBuf::from(file);
+                j.raw = Some(if path.is_absolute() {
+                    path
+                } else {
+                    j.dir.join(path)
+                });
             }
             if j.status == Status::Starting {
                 j.status = Status::Downloading;
@@ -836,32 +856,52 @@ fn handle_line(app: &AppHandle, id: u64, run: u64, live: bool, line: &str) {
     }
 }
 
-/// Second check once a download is done: the file has to be inside the job's
-/// folder. On Windows a channel's video has now and then ended up next to the
-/// folder (beside an empty folder named after the video); this moves it in and
-/// drops such empty folders. Returns the file's final path.
-fn settle_file(dir: &Path, path: &Path) -> Option<PathBuf> {
-    let name = path.file_name()?;
-    let target = dir.join(name);
-    let mut found = path.to_path_buf();
-    if !same_dir(path.parent(), dir) {
-        if path.is_file() && !target.exists() {
-            let moved = std::fs::rename(path, &target).is_ok()
-                || (std::fs::copy(path, &target).is_ok() && std::fs::remove_file(path).is_ok());
-            if moved {
-                found = target;
-            }
-        } else if target.is_file() {
-            found = target;
+/// Validate every completed download, including recordings: file.mp4 belongs
+/// in the job folder's file/file.mp4. Never replace an existing different file.
+fn settle_file(dir: &Path, path: &Path) -> Result<PathBuf, String> {
+    let name = path.file_name().ok_or("El archivo no tiene nombre")?;
+    let stem = path
+        .file_stem()
+        .filter(|s| !s.is_empty())
+        .ok_or("El archivo no tiene nombre")?;
+    let folder = dir.join(stem);
+    let target = folder.join(name);
+    if !path.is_file() {
+        return Err("No se encontró el archivo descargado".into());
+    }
+    if same_dir(path.parent(), &folder) {
+        return Ok(path.to_path_buf());
+    }
+    std::fs::create_dir_all(&folder)
+        .map_err(|e| format!("No se pudo crear la carpeta del vídeo: {e}"))?;
+    if target.exists() {
+        return Err(format!(
+            "Ya existe otro archivo en {}. La descarga se conserva en {}",
+            target.display(),
+            path.display()
+        ));
+    }
+    // A hard link moves across folders without copying gigabytes and cannot
+    // overwrite a destination. Fall back to an exclusive copy across disks.
+    if std::fs::hard_link(path, &target).is_err() {
+        let mut source = std::fs::File::open(path).map_err(|e| e.to_string())?;
+        let mut output = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&target)
+            .map_err(|e| e.to_string())?;
+        if let Err(e) = std::io::copy(&mut source, &mut output).and_then(|_| output.sync_all()) {
+            drop(output);
+            let _ = std::fs::remove_file(&target);
+            return Err(format!("No se pudo colocar el vídeo en su carpeta: {e}"));
         }
     }
-    if let Some(stem) = found.file_stem() {
-        for base in [Some(dir), dir.parent()].into_iter().flatten() {
-            // Only succeeds for an empty folder, so nothing real is lost.
-            let _ = std::fs::remove_dir(base.join(stem));
-        }
+    std::fs::remove_file(path)
+        .map_err(|e| format!("El vídeo se copió, pero no se pudo retirar el original: {e}"))?;
+    if !target.is_file() || !same_dir(target.parent(), &folder) {
+        return Err("No se pudo validar la carpeta del vídeo".into());
     }
-    found.is_file().then_some(found)
+    Ok(target)
 }
 
 fn same_dir(a: Option<&Path>, b: &Path) -> bool {
@@ -917,6 +957,43 @@ pub(crate) fn clean_error(msg: &str) -> String {
     }
 }
 
+/// Kick's old shared /video/UUID links still circulate; the current extractor
+/// uses /channel/videos/UUID and fetches metadata by UUID alone.
+fn normalize_kick_url(url: &str) -> String {
+    let Some(rest) = kick_path(url) else {
+        return url.to_string();
+    };
+    if let Some(id) = rest.strip_prefix("video/") {
+        let id = id.split(['?', '#', '/']).next().unwrap_or("");
+        if id.len() == 36 && id.bytes().all(|b| b.is_ascii_hexdigit() || b == b'-') {
+            return format!("https://kick.com/_/videos/{id}");
+        }
+    }
+    url.to_string()
+}
+
+fn kick_path(url: &str) -> Option<&str> {
+    let (_, rest) = url.split_once("://")?;
+    let (host, path) = rest.split_once('/')?;
+    (host.eq_ignore_ascii_case("kick.com") || host.eq_ignore_ascii_case("www.kick.com"))
+        .then_some(path)
+}
+
+/// Recorded videos and clips stay ordinary downloads even in the live tab.
+fn kick_live(url: &str) -> Option<bool> {
+    let path = kick_path(url)?;
+    let channel = path.split(['?', '#']).next()?.trim_end_matches('/');
+    Some(
+        !channel.is_empty()
+            && !channel.contains('/')
+            && !url.contains("clip=")
+            && !matches!(
+                channel,
+                "categories" | "search" | "auth" | "videos" | "clips"
+            ),
+    )
+}
+
 fn short_url(url: &str) -> String {
     let s = url
         .trim_start_matches("https://")
@@ -948,12 +1025,25 @@ pub fn on_disk(app: &AppHandle, folder: Option<&str>) -> OnDisk {
             continue;
         };
         for e in entries.flatten() {
-            let name = e.file_name().to_string_lossy().into_owned();
-            match classify(&name) {
-                Some(File::Done(id)) => found.ids.push(id.to_string()),
-                Some(File::Partial(id)) => found.partial.push(id.to_string()),
-                Some(File::Named(title)) => found.names.push(title.to_string()),
-                None => {}
+            let Ok(kind) = e.file_type() else { continue };
+            let files = if kind.is_dir() {
+                std::fs::read_dir(e.path())
+                    .map(|items| items.flatten().collect::<Vec<_>>())
+                    .unwrap_or_default()
+            } else {
+                vec![e]
+            };
+            for e in files {
+                if !e.file_type().is_ok_and(|kind| kind.is_file()) {
+                    continue;
+                }
+                let name = e.file_name().to_string_lossy().into_owned();
+                match classify(&name) {
+                    Some(File::Done(id)) => found.ids.push(id.to_string()),
+                    Some(File::Partial(id)) => found.partial.push(id.to_string()),
+                    Some(File::Named(title)) => found.names.push(title.to_string()),
+                    None => {}
+                }
             }
         }
     }
@@ -1060,6 +1150,29 @@ mod tests {
     use super::*;
 
     #[test]
+    fn kick_links_choose_the_right_mode() {
+        let vod = "https://kick.com/facuebbes/videos/01a11bec-c058-7ab7-9ad2-1071ac6a5bbb";
+        assert_eq!(kick_live(vod), Some(false));
+        assert_eq!(
+            kick_live("https://www.kick.com/facuebbes/?foo=1"),
+            Some(true)
+        );
+        assert_eq!(
+            kick_live("https://kick.com/facuebbes?clip=clip_123"),
+            Some(false)
+        );
+        assert_eq!(
+            kick_live("https://kick.com/facuebbes/clips/clip_123"),
+            Some(false)
+        );
+        assert_eq!(kick_live("https://kick.com.evil/facuebbes"), None);
+        assert_eq!(
+            normalize_kick_url("https://kick.com/video/01a11bec-c058-7ab7-9ad2-1071ac6a5bbb"),
+            "https://kick.com/_/videos/01a11bec-c058-7ab7-9ad2-1071ac6a5bbb"
+        );
+    }
+
+    #[test]
     fn errors_are_humanized() {
         assert_eq!(
             clean_error("[youtube] abc: Video unavailable"),
@@ -1126,11 +1239,15 @@ mod tests {
         let stray = root.join("Video [x].mp4");
         std::fs::write(&stray, b"v").unwrap();
         let settled = settle_file(&dir, &stray).unwrap();
-        assert_eq!(settled, dir.join("Video [x].mp4"));
+        assert_eq!(settled, dir.join("Video [x]/Video [x].mp4"));
         assert!(!stray.exists() && settled.is_file());
-        assert!(!dir.join("Video [x]").exists() && !root.join("Video [x]").exists());
+        assert!(dir.join("Video [x]").is_dir());
         // Already in place: left alone.
-        assert_eq!(settle_file(&dir, &settled), Some(settled.clone()));
+        assert_eq!(settle_file(&dir, &settled).unwrap(), settled);
+        std::fs::write(&stray, b"new").unwrap();
+        assert!(settle_file(&dir, &stray).is_err());
+        assert_eq!(std::fs::read(&settled).unwrap(), b"v");
+        assert_eq!(std::fs::read(&stray).unwrap(), b"new");
         std::fs::remove_dir_all(&root).unwrap();
     }
 }

@@ -14,6 +14,11 @@ use tauri::{AppHandle, Manager, State};
 use tauri_plugin_clipboard_manager::ClipboardExt;
 
 #[tauri::command]
+fn app_version() -> &'static str {
+    env!("CARGO_PKG_VERSION")
+}
+
+#[tauri::command]
 fn jobs(queue: State<Queue>) -> Vec<Job> {
     queue.list()
 }
@@ -220,6 +225,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            app_version,
             jobs,
             add_download,
             add_many,

@@ -2,6 +2,19 @@
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-12
+
+### Added
+- Kick y Twitch: videos grabados y clips en Canal, miniaturas, selección y descargas.
+- Kick: clips paginados y enlaces antiguos de videos.
+- Número de versión abajo del círculo.
+
+### Changed
+- Buscador del canal con color violeta distintivo.
+- Toda descarga terminada se valida y se coloca en una carpeta con el mismo nombre:
+  `elpepe/elpepe.mp4`, incluidos directos y audio. Los archivos existentes no se sobrescriben.
+- La detección de archivos ya descargados también revisa estas subcarpetas.
+
 ## [0.3.0] - 2026-10-11
 
 ### Added

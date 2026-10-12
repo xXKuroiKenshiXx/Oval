@@ -66,7 +66,7 @@
           <span class="pill-icon static" aria-hidden="true">
             <svg viewBox="0 0 24 24"><rect x="4" y="4" width="7" height="7" rx="2"/><rect x="13" y="4" width="7" height="7" rx="2"/><rect x="4" y="13" width="7" height="7" rx="2"/><rect x="13" y="13" width="7" height="7" rx="2"/></svg>
           </span>
-          <input id="channel-url" type="text" placeholder="Canal, perfil o playlist (YouTube, TikTok…)" spellcheck="false">
+          <input id="channel-url" type="text" placeholder="Canal o playlist (YouTube, Kick, Twitch…)" spellcheck="false">
           <button type="submit" class="go" id="channel-go" aria-label="Cargar vídeos" title="Cargar vídeos">
             <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6"/><path d="M20 20l-4.2-4.2"/></svg>
           </button>
@@ -163,6 +163,7 @@
         </div>
       </footer>
 
+      <span class="version" id="version" data-tauri-drag-region aria-label="Versión de Oval"></span>
       <div class="menu" id="qmenu" role="menu" hidden></div>
       <div class="toast" id="toast" role="status"></div>
     </div>

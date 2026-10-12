@@ -4,7 +4,7 @@
 //! output lines followed by an exit status.
 
 use serde::Serialize;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::mpsc;
 
 #[derive(Clone, Serialize)]
@@ -84,6 +84,35 @@ pub async fn warm_up(app: AppHandle) {
 
 // ---------------------------------------------------------------- desktop
 
+/// Embedded with the app so channel support ships in the portable executable
+/// and uses the same extractor on desktop and Android.
+async fn channel_plugins(app: &AppHandle) -> Result<std::path::PathBuf, String> {
+    static PREPARED_PLUGINS: tokio::sync::Mutex<Option<std::path::PathBuf>> =
+        tokio::sync::Mutex::const_new(None);
+    let mut prepared = PREPARED_PLUGINS.lock().await;
+    if let Some(path) = prepared.as_ref() {
+        return Ok(path.clone());
+    }
+    let root = app
+        .path()
+        .app_cache_dir()
+        .map_err(|e| e.to_string())?
+        .join("engine-plugins")
+        .join(env!("CARGO_PKG_VERSION"));
+    let extractor = root.join("oval/yt_dlp_plugins/extractor");
+    tokio::fs::create_dir_all(&extractor)
+        .await
+        .map_err(|e| e.to_string())?;
+    tokio::fs::write(
+        extractor.join("oval_kick.py"),
+        include_str!("../engine_plugins/oval/yt_dlp_plugins/extractor/oval_kick.py"),
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+    *prepared = Some(root.clone());
+    Ok(root)
+}
+
 #[cfg(desktop)]
 pub async fn prepare(app: &AppHandle) -> Result<(), String> {
     crate::tools::ensure(app).await.map(|_| ())
@@ -100,7 +129,9 @@ pub async fn ytdlp(app: &AppHandle, args: Vec<String>) -> Result<Task, String> {
     use tokio::io::{AsyncBufReadExt, BufReader};
 
     let tools = crate::tools::ensure(app).await?;
+    let plugins = channel_plugins(app).await?;
     let mut cmd = tokio::process::Command::new(&tools.ytdlp);
+    cmd.arg("--plugin-dirs").arg(plugins);
     if let Some(ff) = &tools.ffmpeg_dir {
         cmd.arg("--ffmpeg-location").arg(ff);
     }
@@ -163,9 +194,6 @@ pub fn kill(_app: &AppHandle, handle: Handle) {
 // ---------------------------------------------------------------- mobile
 
 #[cfg(mobile)]
-use tauri::Manager;
-
-#[cfg(mobile)]
 static PREPARED: tokio::sync::Mutex<bool> = tokio::sync::Mutex::const_new(false);
 
 #[cfg(mobile)]
@@ -203,11 +231,16 @@ async fn update(app: AppHandle) {
 }
 
 #[cfg(mobile)]
-pub async fn ytdlp(app: &AppHandle, args: Vec<String>) -> Result<Task, String> {
+pub async fn ytdlp(app: &AppHandle, mut args: Vec<String>) -> Result<Task, String> {
     use std::sync::atomic::{AtomicU64, Ordering};
     static NEXT: AtomicU64 = AtomicU64::new(1);
 
     prepare(app).await?;
+    let plugins = channel_plugins(app).await?;
+    args.splice(
+        0..0,
+        ["--plugin-dirs".into(), plugins.display().to_string()],
+    );
     let id = NEXT.fetch_add(1, Ordering::Relaxed);
     let (tx, rx) = mpsc::unbounded_channel();
     let handle = app.clone();
