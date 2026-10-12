@@ -173,7 +173,7 @@ En Linux usa `cargo tauri build --bundles appimage,deb,rpm`. Los paquetes quedan
 `target/release/bundle/`. Las recetas del Flatpak, Arch y Void están en `packaging/` y reempaquetan
 el `.deb`.
 
-Para Android hacen falta JDK 17, el SDK (plataforma 37) y el NDK 27; el proyecto ya está en
+Para Android hacen falta Node.js, JDK 17, el SDK (paquete `platforms;android-37.0`) y el NDK 27; el proyecto ya está en
 `gen/android`:
 
 ```bash

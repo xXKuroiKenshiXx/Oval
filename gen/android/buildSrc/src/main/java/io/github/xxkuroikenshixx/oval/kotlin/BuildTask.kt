@@ -23,7 +23,9 @@ abstract class BuildTask : DefaultTask() {
 
     @TaskAction
     fun assemble() {
-        val executable = """cargo""";
+        // The release workflow installs the Node CLI. Use that same CLI for
+        // Gradle's Rust tasks instead of requiring a separate cargo-tauri.
+        val executable = """npx""";
         try {
             runTauriCli(executable)
         } catch (e: Exception) {
@@ -55,7 +57,7 @@ abstract class BuildTask : DefaultTask() {
         val rootDirRel = rootDirRel ?: throw GradleException("rootDirRel cannot be null")
         val target = target ?: throw GradleException("target cannot be null")
         val release = release ?: throw GradleException("release cannot be null")
-        val args = listOf("tauri", "android", "android-studio-script");
+        val args = listOf("--yes", "@tauri-apps/cli@2", "android", "android-studio-script");
 
         execOperations.exec {
             workingDir(File(projectDir, rootDirRel))
