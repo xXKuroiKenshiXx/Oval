@@ -601,16 +601,16 @@ async fn run_job(app: &AppHandle, id: u64, run: u64) -> Result<(), String> {
         return finish_recording(app, id, run, success, error).await;
     }
     let settled = if success {
-        let path = {
+        let (path, stem) = {
             let jobs = q.jobs.lock().unwrap();
             jobs.iter()
                 .find(|j| j.id == id && j.run == run)
-                .and_then(|j| j.path.clone())
+                .map(|j| (j.path.clone(), j.stem.clone()))
+                .unwrap_or_default()
         };
-        Some(settle_file(
-            &dir,
-            Path::new(&path.ok_or("No se encontró el archivo descargado")?),
-        )?)
+        let path = find_downloaded(&dir, path.as_deref(), stem.as_deref())
+            .ok_or("No se encontró el archivo descargado")?;
+        Some(settle_file(&dir, &path)?)
     } else {
         None
     };
@@ -854,6 +854,43 @@ fn handle_line(app: &AppHandle, id: u64, run: u64, live: bool, line: &str) {
     } else if let Some(path) = line.strip_prefix("OVALF|") {
         q.update_run(app, id, run, |j| j.path = Some(path.to_string()));
     }
+}
+
+/// The finished file. yt-dlp's final "after_move" line can go missing (the
+/// Android engine may report the exit before its last output) or name a path
+/// that does not match the disk, so look for the file by name before giving up:
+/// "Title [id].mp4" in the job folder or already in its own subfolder.
+fn find_downloaded(dir: &Path, reported: Option<&str>, stem: Option<&str>) -> Option<PathBuf> {
+    if let Some(p) = reported.filter(|p| !p.is_empty()) {
+        let p = Path::new(p);
+        let p = if p.is_absolute() { p.to_path_buf() } else { dir.join(p) };
+        if p.is_file() {
+            return Some(p);
+        }
+    }
+    let stem = reported
+        .and_then(|p| Path::new(p).file_stem())
+        .map(|s| s.to_string_lossy().into_owned())
+        .into_iter()
+        .chain(stem.map(String::from))
+        .filter(|s| !s.is_empty());
+    for stem in stem {
+        for folder in [dir.join(&stem), dir.to_path_buf()] {
+            let Ok(entries) = std::fs::read_dir(&folder) else {
+                continue;
+            };
+            let found = entries.flatten().map(|e| e.path()).find(|p| {
+                p.is_file()
+                    && p.file_stem().is_some_and(|s| s.to_string_lossy() == stem)
+                    && p.extension()
+                        .is_some_and(|e| is_media(&e.to_string_lossy()))
+            });
+            if found.is_some() {
+                return found;
+            }
+        }
+    }
+    None
 }
 
 /// Validate every completed download, including recordings: file.mp4 belongs
@@ -1228,6 +1265,24 @@ mod tests {
         assert_eq!(sanitize("COM1.txt"), "COM1.txt_");
         let long = format!("{} . x", "a".repeat(78));
         assert!(!sanitize(&long).ends_with([' ', '.']));
+    }
+
+    #[test]
+    fn downloads_are_found_without_their_final_path() {
+        let dir = std::env::temp_dir().join(format!("oval-find-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("Video [x].mp4");
+        std::fs::write(&file, b"v").unwrap();
+        std::fs::write(dir.join("Video [x].f137.mp4.part"), b"p").unwrap();
+        // The final path line never arrived: the name from before_dl is enough,
+        // even when the remux changed the extension.
+        assert_eq!(find_downloaded(&dir, None, Some("Video [x]")), Some(file.clone()));
+        let missing = dir.join("otro/Video [x].mp4").display().to_string();
+        assert_eq!(find_downloaded(&dir, Some(&missing), None), Some(file.clone()));
+        let settled = settle_file(&dir, &file).unwrap();
+        assert_eq!(find_downloaded(&dir, None, Some("Video [x]")), Some(settled));
+        assert_eq!(find_downloaded(&dir, None, Some("Nada")), None);
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

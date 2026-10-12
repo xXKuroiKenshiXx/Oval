@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-10-12
+
+### Fixed
+- "No se encontró el archivo descargado" aparecía con vídeos que sí se habían descargado
+  (sobre todo enlaces directos y descargas en tanda): ahora Oval busca el archivo por su nombre
+  y lo coloca en su carpeta. En Android ya no se pierde la ruta final del vídeo.
+
 ## [0.4.0] - 2026-10-12
 
 ### Added

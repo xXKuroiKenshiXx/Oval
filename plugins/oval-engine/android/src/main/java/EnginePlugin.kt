@@ -112,8 +112,16 @@ class EnginePlugin(private val activity: Activity) : Plugin(activity) {
                 val qjs = java.io.File(activity.applicationInfo.nativeLibraryDir, "libqjs.so")
                 val runtime = if (qjs.exists()) listOf("--js-runtimes", "quickjs:${qjs.absolutePath}") else emptyList()
                 val request = YoutubeDLRequest(emptyList<String>()).addCommands(runtime + a.args.toList())
+                var sawFinal = false
                 val response = YoutubeDL.getInstance().execute(request, a.id.toString(), false) { _, _, line ->
+                    if (line.startsWith("OVALF|")) sawFinal = true
                     a.channel.emit("out", line)
+                }
+                // The streamed callback can miss the last line (the finished
+                // file's path); the full output still has it.
+                if (!sawFinal) {
+                    response.out.lineSequence().filter { it.startsWith("OVALF|") }
+                        .forEach { a.channel.emit("out", it) }
                 }
                 response.err.lineSequence().filter { it.isNotBlank() }.forEach { a.channel.emit("err", it) }
                 code = response.exitCode
