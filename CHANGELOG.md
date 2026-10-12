@@ -4,10 +4,17 @@
 
 ## [0.4.1] - 2026-10-12
 
+**Actualización de emergencia de 0.4.1**: reemplaza los paquetes anteriores de esta misma
+versión porque el primer arreglo no solucionó todos los casos.
+
 ### Fixed
-- "No se encontró el archivo descargado" aparecía con vídeos que sí se habían descargado
-  (sobre todo enlaces directos y descargas en tanda): ahora Oval busca el archivo por su nombre
-  y lo coloca en su carpeta. En Android ya no se pierde la ruta final del vídeo.
+- Rutas y metadatos transmitidos como JSON: acentos, caracteres Unicode y separadores en títulos
+  ya no convierten un archivo existente en «No se encontró el archivo descargado».
+- Solo Canal crea subcarpetas. Videos individuales, audio y directos se guardan directamente en
+  la carpeta seleccionada, sin crear una carpeta por video.
+- Pegado de enlaces dentro de texto, enlaces de Markdown, parámetros y formatos compartidos.
+- Validación previa de formatos: si una URL de CDN falla, el motor intenta otra variante
+  descargable, comprobado con videos de TikTok.
 
 ## [0.4.0] - 2026-10-12
 

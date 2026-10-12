@@ -43,8 +43,8 @@ Y además:
 
 - **Sin preguntas**: no hay diálogo de "guardar como". Todo va a `Descargas/Oval`
   (cámbialo con el lápiz junto a la carpeta y se recuerda).
-  Al terminar, cada archivo queda en una carpeta con su mismo nombre:
-  `Oval/elpepe/elpepe.mp4`; en Canal, `Oval/Canal/elpepe/elpepe.mp4`.
+  Solo Canal crea subcarpetas: `Oval/Canal/elpepe.mp4`. Los enlaces individuales, audio
+  y directos quedan directamente en la carpeta seleccionada.
 - **Rápido**: fragmentos en paralelo, motor precargado al abrir y arranque casi instantáneo.
 - **Tiempo estimado, velocidad y tamaño** de cada descarga en vivo.
 - **Pausar, reanudar y cancelar**. Al reanudar continúa donde se quedó; al cancelar borra los

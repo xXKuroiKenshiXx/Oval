@@ -460,6 +460,8 @@ async fn run_job(app: &AppHandle, id: u64, run: u64) -> Result<(), String> {
 
     let mut args: Vec<String> = [
         "--ignore-config",
+        "--encoding",
+        "utf-8",
         "--no-warnings",
         "--newline",
         "--progress",
@@ -469,9 +471,9 @@ async fn run_job(app: &AppHandle, id: u64, run: u64) -> Result<(), String> {
         "download:OVALP|%(progress.status)s|%(progress.downloaded_bytes)s|%(progress.total_bytes)s|%(progress.total_bytes_estimate)s|%(progress.speed)s|%(progress.eta)s",
         "--no-simulate",
         "--print",
-        "before_dl:OVALM|%(format_id)s|%(thumbnail)s|%(filename)s|%(title)s",
+        "before_dl:OVALM|%(.{format_id,thumbnail,filename,title})j",
         "--print",
-        "after_move:OVALF|%(filepath)s",
+        "after_move:OVALF|%(filepath)j",
         "--no-playlist",
         "--no-mtime",
         "--concurrent-fragments",
@@ -497,6 +499,11 @@ async fn run_job(app: &AppHandle, id: u64, run: u64) -> Result<(), String> {
     args.push(format!("home:{}", dir.display()));
     args.push("-P".into());
     args.push(format!("temp:{}", dir.display()));
+    if !live {
+        // A site's preferred CDN URL may be stale or throttled. Check selected
+        // formats and let yt-dlp choose the next downloadable alternative.
+        args.push("--check-formats".into());
+    }
     // "res:1080" = the best stream no taller than 1080p. H.264/AAC wins ties so
     // files open everywhere, editors included; above 1080p YouTube has no H.264.
     let sort = match &quality {
@@ -768,6 +775,16 @@ async fn finalize_recording(_app: &AppHandle, raw: &Path) -> PathBuf {
     }
 }
 
+/// ASCII JSON on the wire preserves Windows filenames independently of the
+/// engine's console encoding, including accents, emoji, quotes and delimiters.
+#[derive(Deserialize)]
+struct DownloadMetadata {
+    format_id: Option<String>,
+    thumbnail: Option<String>,
+    filename: Option<String>,
+    title: Option<String>,
+}
+
 fn handle_line(app: &AppHandle, id: u64, run: u64, live: bool, line: &str) {
     let q = queue(app);
     if let Some(rest) = line.strip_prefix("OVALP|") {
@@ -821,13 +838,13 @@ fn handle_line(app: &AppHandle, id: u64, run: u64, live: bool, line: &str) {
             }
         });
     } else if let Some(rest) = line.strip_prefix("OVALM|") {
-        let mut f = rest.splitn(4, '|');
-        let (format, thumb, file, title) = (
-            f.next().unwrap_or(""),
-            f.next().unwrap_or("NA"),
-            f.next().unwrap_or(""),
-            f.next().unwrap_or(""),
-        );
+        let Ok(metadata) = serde_json::from_str::<DownloadMetadata>(rest) else {
+            return;
+        };
+        let format = metadata.format_id.as_deref().unwrap_or("");
+        let thumb = metadata.thumbnail.as_deref().unwrap_or("");
+        let file = metadata.filename.as_deref().unwrap_or("");
+        let title = metadata.title.as_deref().unwrap_or("");
         q.update_run(app, id, run, |j| {
             j.parts = format.matches('+').count() as u32 + 1;
             if !title.is_empty() && title != "NA" {
@@ -852,7 +869,9 @@ fn handle_line(app: &AppHandle, id: u64, run: u64, live: bool, line: &str) {
             }
         });
     } else if let Some(path) = line.strip_prefix("OVALF|") {
-        q.update_run(app, id, run, |j| j.path = Some(path.to_string()));
+        if let Ok(path) = serde_json::from_str::<String>(path) {
+            q.update_run(app, id, run, |j| j.path = Some(path));
+        }
     }
 }
 
@@ -863,7 +882,11 @@ fn handle_line(app: &AppHandle, id: u64, run: u64, live: bool, line: &str) {
 fn find_downloaded(dir: &Path, reported: Option<&str>, stem: Option<&str>) -> Option<PathBuf> {
     if let Some(p) = reported.filter(|p| !p.is_empty()) {
         let p = Path::new(p);
-        let p = if p.is_absolute() { p.to_path_buf() } else { dir.join(p) };
+        let p = if p.is_absolute() {
+            p.to_path_buf()
+        } else {
+            dir.join(p)
+        };
         if p.is_file() {
             return Some(p);
         }
@@ -893,15 +916,11 @@ fn find_downloaded(dir: &Path, reported: Option<&str>, stem: Option<&str>) -> Op
     None
 }
 
-/// Validate every completed download, including recordings: file.mp4 belongs
-/// in the job folder's file/file.mp4. Never replace an existing different file.
+/// Single links and recordings stay in the selected root. Channel jobs already
+/// have their channel subfolder in `dir`. Never create a per-video folder.
 fn settle_file(dir: &Path, path: &Path) -> Result<PathBuf, String> {
     let name = path.file_name().ok_or("El archivo no tiene nombre")?;
-    let stem = path
-        .file_stem()
-        .filter(|s| !s.is_empty())
-        .ok_or("El archivo no tiene nombre")?;
-    let folder = dir.join(stem);
+    let folder = dir.to_path_buf();
     let target = folder.join(name);
     if !path.is_file() {
         return Err("No se encontró el archivo descargado".into());
@@ -1268,6 +1287,32 @@ mod tests {
     }
 
     #[test]
+    fn json_metadata_preserves_unicode_and_delimiters() {
+        let name = "Nature’s 世界 | quote \"x\" [id].mp4";
+        let raw = serde_json::json!({"filename": name, "title": "title | caption", "format_id": "v+a", "thumbnail": null}).to_string();
+        let metadata: DownloadMetadata = serde_json::from_str(&raw).unwrap();
+        assert_eq!(metadata.filename.as_deref(), Some(name));
+        assert_eq!(metadata.title.as_deref(), Some("title | caption"));
+        let path = serde_json::to_string(&name).unwrap();
+        assert_eq!(serde_json::from_str::<String>(&path).unwrap(), name);
+    }
+
+    #[test]
+    fn individual_downloads_do_not_create_folders() {
+        let dir = std::env::temp_dir().join(format!("oval-flat-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("Nature’s gifts [id].mp4");
+        std::fs::write(&file, b"video").unwrap();
+        assert_eq!(settle_file(&dir, &file).unwrap(), file);
+        assert!(!dir.join("Nature’s gifts [id]").exists());
+        assert_eq!(
+            find_downloaded(&dir, None, Some("Nature’s gifts [id]")),
+            Some(file)
+        );
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
     fn downloads_are_found_without_their_final_path() {
         let dir = std::env::temp_dir().join(format!("oval-find-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
@@ -1276,11 +1321,20 @@ mod tests {
         std::fs::write(dir.join("Video [x].f137.mp4.part"), b"p").unwrap();
         // The final path line never arrived: the name from before_dl is enough,
         // even when the remux changed the extension.
-        assert_eq!(find_downloaded(&dir, None, Some("Video [x]")), Some(file.clone()));
+        assert_eq!(
+            find_downloaded(&dir, None, Some("Video [x]")),
+            Some(file.clone())
+        );
         let missing = dir.join("otro/Video [x].mp4").display().to_string();
-        assert_eq!(find_downloaded(&dir, Some(&missing), None), Some(file.clone()));
+        assert_eq!(
+            find_downloaded(&dir, Some(&missing), None),
+            Some(file.clone())
+        );
         let settled = settle_file(&dir, &file).unwrap();
-        assert_eq!(find_downloaded(&dir, None, Some("Video [x]")), Some(settled));
+        assert_eq!(
+            find_downloaded(&dir, None, Some("Video [x]")),
+            Some(settled)
+        );
         assert_eq!(find_downloaded(&dir, None, Some("Nada")), None);
         std::fs::remove_dir_all(&dir).unwrap();
     }
@@ -1294,7 +1348,7 @@ mod tests {
         let stray = root.join("Video [x].mp4");
         std::fs::write(&stray, b"v").unwrap();
         let settled = settle_file(&dir, &stray).unwrap();
-        assert_eq!(settled, dir.join("Video [x]/Video [x].mp4"));
+        assert_eq!(settled, dir.join("Video [x].mp4"));
         assert!(!stray.exists() && settled.is_file());
         assert!(dir.join("Video [x]").is_dir());
         // Already in place: left alone.

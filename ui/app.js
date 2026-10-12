@@ -88,18 +88,30 @@ function shake(el) {
 /* ---------- Links ---------- */
 
 function normalizeUrl(raw) {
-  let s = raw.trim().replace(/^<|>$/g, "");
+  let s = raw.trim().replace(/^[<"'([{]+/, "").replace(/[>"'\]},.;]+$/, "");
+  while (s.endsWith(")") && (s.match(/\)/g) || []).length > (s.match(/\(/g) || []).length) s = s.slice(0, -1);
   if (!s) return null;
+  if (/^https?%3a%2f%2f/i.test(s)) {
+    try { s = decodeURIComponent(s); } catch { return null; }
+  }
+  if (s.startsWith("//")) s = "https:" + s;
   if (!/^https?:\/\//i.test(s)) {
     if (!/^[\w-]+(\.[\w-]+)+(\/|$)/.test(s)) return null;
     s = "https://" + s;
   }
   try {
     const u = new URL(s);
-    return u.hostname.includes(".") ? u.href : null;
+    return u.hostname ? u.href : null;
   } catch {
     return null;
   }
+}
+
+/** Shared captions and Markdown often surround the actual link with text. */
+function extractUrls(text) {
+  const explicit = text.match(/https?:\/\/(?:\[[0-9a-f:.%]+\]|[^\s<>"\[\]])[^\s<>"\[\]]*/gi) || [];
+  const candidates = [...explicit, ...text.split(/\s+/).filter((part) => !part.includes("://"))];
+  return [...new Set(candidates.map(normalizeUrl).filter(Boolean))];
 }
 
 const hostOf = (url) => {
@@ -429,7 +441,7 @@ function syncQueueChrome() {
 }
 
 async function addLinks(text) {
-  const urls = text.split(/\s+/).map(normalizeUrl).filter(Boolean);
+  const urls = extractUrls(text);
   if (!urls.length) {
     shake($("#link-form"));
     toast("Eso no parece un enlace", true);

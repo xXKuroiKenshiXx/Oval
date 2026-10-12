@@ -18,7 +18,9 @@ jobs:
         with:
           node-version: 22
       - name: Test
-        run: cargo test --locked
+        run: |
+          node tests/test_urls.cjs
+          cargo test --locked
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -55,7 +57,9 @@ jobs:
         with:
           node-version: 22
       - name: Test
-        run: cargo test --locked
+        run: |
+          node tests/test_urls.cjs
+          cargo test --locked
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -213,13 +217,16 @@ jobs:
             test -s "dist/$file" || { echo "Missing release asset: $file"; exit 1; }
           done
           notes=$(awk -v v="$version" 'index($0, "## [" v "]") == 1 {f=1; next} /^## / {f=0} f' CHANGELOG.md)
+          printf '%s\n' "${notes:-Oval ${version}}" > "$RUNNER_TEMP/oval-release-notes.md"
           # A release may already exist (published by hand with a signed APK);
           # then just add or refresh the files built here.
           if gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1; then
             gh release upload "$GITHUB_REF_NAME" dist/* --clobber
+            gh release edit "$GITHUB_REF_NAME" --title "Oval ${version}" \
+              --notes-file "$RUNNER_TEMP/oval-release-notes.md"
           else
             gh release create "$GITHUB_REF_NAME" \
               --title "Oval ${version}" \
-              --notes "${notes:-Oval ${version}}" \
+              --notes-file "$RUNNER_TEMP/oval-release-notes.md" \
               dist/*
           fi
