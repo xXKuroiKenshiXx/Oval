@@ -50,17 +50,21 @@ jobs:
           udid=$(xcrun simctl create oval "$type")
           xcrun simctl boot "$udid"
           xcrun simctl install "$udid" "$app"
+          id=io.github.xxkuroikenshixx.oval
           check() {
-            log="$RUNNER_TEMP/run.log"
-            : > "$log"
-            SIMCTL_CHILD_OVAL_SELFTEST="$1" xcrun simctl launch --console-pty --terminate-running-process "$udid" io.github.xxkuroikenshixx.oval > "$log" 2>&1 &
-            for _ in $(seq 600); do grep -qE "OVAL_SELFTEST (ok|error|timeout)" "$log" && break; sleep 1; done
-            xcrun simctl terminate "$udid" io.github.xxkuroikenshixx.oval || true
-            cat "$log" >> "$RUNNER_TEMP/sim.log"
-            grep -m1 -E "OVAL_SELFTEST (ok|error|timeout)" "$log" > "$RUNNER_TEMP/result" || echo "OVAL_SELFTEST no answer" > "$RUNNER_TEMP/result"
-            grep OVAL_SELFTEST_STEP "$log" || true
-            cat "$RUNNER_TEMP/result"
-            grep -q "OVAL_SELFTEST ok" "$RUNNER_TEMP/result"
+            xcrun simctl terminate "$udid" "$id" 2>/dev/null || true
+            log="$(xcrun simctl get_app_container "$udid" "$id" data)/Library/Caches/$id/selftest.log"
+            rm -f "$log"
+            SIMCTL_CHILD_OVAL_SELFTEST="$1" xcrun simctl launch "$udid" "$id"
+            for _ in $(seq 600); do grep -qE "OVAL_SELFTEST (ok|error|timeout)" "$log" 2>/dev/null && break; sleep 1; done
+            xcrun simctl terminate "$udid" "$id" 2>/dev/null || true
+            cat "$log" >> "$RUNNER_TEMP/sim.log" 2>/dev/null || true
+            cat "$log" 2>/dev/null || true
+            grep -m1 -E "OVAL_SELFTEST (ok|error|timeout)" "$log" > "$RUNNER_TEMP/result" 2>/dev/null || echo "OVAL_SELFTEST no answer" > "$RUNNER_TEMP/result"
+            grep -q "OVAL_SELFTEST ok" "$RUNNER_TEMP/result" || return 1
+            # The simulator's files live on this Mac: the download must be there.
+            file=$(sed 's/^OVAL_SELFTEST ok //' "$RUNNER_TEMP/result")
+            test -s "$file" && ls -la "$file"
           }
           # A plain file: Python, TLS and yt-dlp work inside the app.
           check "https://archive.org/download/Popeye_forPresident/Popeye_forPresident_512kb.mp4"

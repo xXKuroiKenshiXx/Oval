@@ -216,16 +216,36 @@ async fn choose_folder() -> Option<String> {
 }
 
 /// Smoke test for phones and simulators in CI: with `OVAL_SELFTEST=<link>`
-/// the app downloads the link, prints the outcome and quits.
+/// the app downloads the link, reports the outcome and quits. iOS doesn't
+/// hand stdout to the simulator console, so each line also goes to
+/// `selftest.log` in the app's cache folder.
 #[cfg(mobile)]
 async fn selftest(app: AppHandle, url: String) {
     use downloads::Status;
+    use std::io::Write;
+
+    let log = app.path().app_cache_dir().ok().map(|d| {
+        let _ = std::fs::create_dir_all(&d);
+        d.join("selftest.log")
+    });
+    let report = |line: String| {
+        println!("{line}");
+        if let Some(file) = log.as_ref().and_then(|p| {
+            std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(p)
+                .ok()
+        }) {
+            let _ = writeln!(&file, "{line}");
+        }
+    };
+    report("OVAL_SELFTEST_STEP started".into());
     let queue = app.state::<Queue>();
     let item = NewJob {
         url,
         ..NewJob::default()
     };
-    println!("OVAL_SELFTEST_STEP started");
     let id = queue.add(&app, vec![item], Mode::Video, Some("360"), None, false)[0].id;
     for second in 0..900 {
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
@@ -233,27 +253,29 @@ async fn selftest(app: AppHandle, url: String) {
             break;
         };
         if second % 15 == 0 {
-            let engine = engine::status();
-            println!(
+            report(format!(
                 "OVAL_SELFTEST_STEP {:?} {:.0}% engine: {}",
                 job.status,
                 job.progress * 100.0,
-                engine.message
-            );
+                engine::status().message
+            ));
         }
         match job.status {
             Status::Done => {
-                println!("OVAL_SELFTEST ok {}", job.path.unwrap_or_default());
+                report(format!("OVAL_SELFTEST ok {}", job.path.unwrap_or_default()));
                 std::process::exit(0);
             }
             Status::Error => {
-                println!("OVAL_SELFTEST error {}", job.error.unwrap_or_default());
+                report(format!(
+                    "OVAL_SELFTEST error {}",
+                    job.error.unwrap_or_default()
+                ));
                 std::process::exit(1);
             }
             _ => {}
         }
     }
-    println!("OVAL_SELFTEST timeout");
+    report("OVAL_SELFTEST timeout".into());
     std::process::exit(1);
 }
 
