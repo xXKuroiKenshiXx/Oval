@@ -6,9 +6,11 @@
 //! | Request                | Body                                              |
 //! | ---------------------- | ------------------------------------------------- |
 //! | `GET  /v1/hello`       |                                                   |
-//! | `POST /v1/download`    | url, title?, mode?, quality?, section?, precise?, folder? |
+//! | `POST /v1/download`    | url, title?, mode?, quality?, section?, precise?, folder?, live? |
+//! | `POST /v1/live`        | url: is it a live stream, since when, its recording |
 //! | `GET  /v1/jobs?ids=1,2`|                                                   |
 //! | `POST /v1/cancel`      | id                                                |
+//! | `POST /v1/stop`        | id: end a live recording and keep it              |
 //! | `POST /v1/transcript`  | url, format, lang?, section?, note?, folder?      |
 //! | `POST /v1/thumbnail`   | url, folder?                                      |
 //! | `POST /v1/pick-folder` | folder?                                           |
@@ -144,6 +146,11 @@ async fn route(app: &AppHandle, method: Method, path: &str, query: &str, body: &
             "folder": downloads::download_root(app),
         })),
         (Method::Post, "/v1/download") => download(app, body),
+        (Method::Post, "/v1/live") => {
+            let url = str_field(body, "url").ok_or_else(|| bad("Falta el enlace"))?;
+            let info = crate::live::info(app, url).await.map_err(|e| (502, e))?;
+            Ok(json!(info))
+        }
         (Method::Get, "/v1/jobs") => {
             let ids: Vec<u64> = query
                 .strip_prefix("ids=")
@@ -165,6 +172,14 @@ async fn route(app: &AppHandle, method: Method, path: &str, query: &str, body: &
                 .and_then(Value::as_u64)
                 .ok_or_else(|| bad("Falta el id"))?;
             app.state::<Queue>().cancel(app, id);
+            Ok(json!({ "ok": true }))
+        }
+        (Method::Post, "/v1/stop") => {
+            let id = body
+                .get("id")
+                .and_then(Value::as_u64)
+                .ok_or_else(|| bad("Falta el id"))?;
+            app.state::<Queue>().stop_live(app, id);
             Ok(json!({ "ok": true }))
         }
         (Method::Post, "/v1/transcript") => {
@@ -265,8 +280,10 @@ fn download(app: &AppHandle, body: &Value) -> Answer {
         },
     };
     let quality = str_field(body, "quality");
+    // Record a live stream from now on, like the app's Directo tab.
+    let live = body.get("live").and_then(Value::as_bool).unwrap_or(false);
     let jobs = app
         .state::<Queue>()
-        .add(app, vec![item], mode, quality, None, false);
+        .add(app, vec![item], mode, quality, None, live);
     Ok(json!(jobs.first()))
 }

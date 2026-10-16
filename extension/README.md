@@ -4,13 +4,14 @@ Un panel flotante para mandar a Oval lo que estás viendo: el vídeo entero, un 
 con entrada y salida, la transcripción o la miniatura. Funciona en YouTube y en
 cualquier página con vídeo que yt-dlp sepa descargar.
 
-La extensión no descarga nada por su cuenta: habla con la app de Oval abierta en el
-mismo equipo (Windows o Linux), que hace el trabajo y muestra las descargas en su lista.
+La extensión no descarga nada por su cuenta: habla con la app de Oval del mismo equipo
+(Windows o Linux), que hace el trabajo y muestra las descargas en su lista. Si Oval está
+cerrado, la extensión lo abre (el navegador pregunta la primera vez si puede abrir Oval).
 
 ## Uso
 
-1. Abre Oval.
-2. Pulsa el botón de Oval en la barra del navegador (o <kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>O</kbd>).
+1. Pulsa el botón de Oval en la barra del navegador (o <kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>O</kbd>).
+2. Si Oval está cerrado, toca **Abrir Oval** arriba a la derecha (o cualquier botón).
 3. En el panel:
    - **[ IN** y **OUT ]** marcan el tramo en el momento actual del vídeo; también
      puedes arrastrar los tiradores. **Preciso** corta en el fotograma exacto.
@@ -20,6 +21,16 @@ mismo equipo (Windows o Linux), que hace el trabajo y muestra las descargas en s
    - **Ver en YouTube** abre el panel de transcripción de YouTube.
    - La **nota** (TL;DR) se añade al principio de la transcripción en Markdown.
    - **Destino**: por defecto la carpeta de Oval; el lápiz abre un selector de carpeta.
+
+En un **directo de Twitch o Kick** el panel cambia:
+
+- **[ IN** y **OUT ]** marcan el momento del directo que estás viendo; **Último min**, **5**,
+  **15 min** y **1 h** marcan lo último que se emitió.
+- **Mandar a la cola** baja ese tramo de la grabación que el sitio guarda mientras emite
+  (espera unos segundos si el tramo acaba de pasar).
+- **Desde el inicio** baja todo lo emitido hasta ahora y **Grabar desde ahora** graba hasta
+  que tocas ✕, que detiene la grabación y la guarda.
+- Si el canal no guarda sus directos, solo se puede grabar desde ahora.
 
 Clic derecho en un enlace, un vídeo o la página: **Descargar con Oval**.
 
@@ -38,6 +49,8 @@ python extension/build.py
 
 ## Cómo se conecta
 
-Oval escucha en `127.0.0.1` en el primer puerto libre de 17177, 27177 y 37177
+Cada vez que se abre, Oval registra el enlace `oval://` con su propia ubicación (instalado o
+portable); la extensión lo usa para abrirlo. Oval escucha en `127.0.0.1` en el primer puerto
+libre de 17177, 27177 y 37177
 (`src/bridge.rs`) y solo acepta peticiones de extensiones: las páginas web no pueden
 usarlo. Las rutas están documentadas al principio de `src/bridge.rs`.

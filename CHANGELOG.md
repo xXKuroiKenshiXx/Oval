@@ -2,6 +2,20 @@
 
 ## [Unreleased]
 
+## [0.5.2] - 2026-10-16
+
+### Added
+- Extensión: directos de Twitch y Kick. En un canal en directo el panel marca entrada y
+  salida sobre el directo, baja el último minuto, 5, 15 o 60 minutos, todo desde el inicio
+  o lo graba desde ahora (y ✕ detiene la grabación y la guarda). Los tramos salen de la
+  grabación que Twitch y Kick guardan mientras emiten.
+- Extensión: «Abrir Oval» arranca la app si está cerrada, sea la instalada o la portable,
+  y cualquier botón la abre solo cuando hace falta. Oval registra el enlace `oval://` cada
+  vez que se abre, así que sigue funcionando aunque muevas el portable.
+
+### Changed
+- Solo se abre un Oval a la vez: abrirlo otra vez trae al frente el que ya está abierto.
+
 ## [0.5.1] - 2026-10-16
 
 ### Fixed

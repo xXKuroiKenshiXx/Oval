@@ -157,8 +157,10 @@
   async function connect() {
     try {
       const hello = await oval("/v1/hello");
-      if (!state.connected) log(`Conectado con Oval ${hello.version}`);
+      const first = !state.connected;
+      if (first) log(`Conectado con Oval ${hello.version}`);
       state.connected = true;
+      if (first) setTimeout(checkLive, 0);
       state.ovalFolder = hello.folder || "";
     } catch (err) {
       if (state.connected !== false) log(String(err.message || err), "error");
@@ -300,6 +302,15 @@ select option { background: var(--bg-2); color: var(--text); }
 textarea { width: 100%; min-height: 58px; resize: vertical; padding: 10px 14px; border: 0; border-radius: 20px; background: var(--surface); box-shadow: inset 0 0 0 1px var(--line); color: var(--text); font: inherit; font-weight: 500; user-select: text; }
 textarea::placeholder { color: var(--text-3); }
 
+.slot { display: contents; }
+.live-label { display: flex; align-items: center; gap: 7px; color: var(--red); }
+.live-label::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--red); animation: blink 1.4s ease-in-out infinite; }
+@keyframes blink { 50% { opacity: .25; } }
+.live-clock { margin-left: auto; color: var(--text-2); letter-spacing: 0; font-variant-numeric: tabular-nums; }
+.pill .rec-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--red); flex: none; }
+.hint { padding: 0 4px; font-size: 11px; color: var(--text-3); }
+.get-oval { align-self: flex-start; margin-left: 6px; text-decoration: none; }
+
 /* Jobs */
 .jobs { display: flex; flex-direction: column; gap: 6px; }
 .jobs:empty { display: none; }
@@ -311,6 +322,8 @@ textarea::placeholder { color: var(--text-3); }
 .ring span { display: grid; place-items: center; width: 100%; height: 100%; border-radius: 50%; background: var(--bg-2); color: var(--mint); }
 .ring svg { width: 13px; height: 13px; stroke-width: 2.4; }
 .job.error .ring { --c: var(--red); --p: 1; }
+.job.live.downloading .ring, .job.live.starting .ring { --c: var(--red); --p: 1 !important; animation: pulse 1.8s ease-in-out infinite; }
+@keyframes pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(255,93,108,.45); } 50% { box-shadow: 0 0 0 5px rgba(255,93,108,0); } }
 .job.error .ring span { color: var(--red); }
 .job.queued .ring, .job.starting .ring { animation: breathe 1.4s ease-in-out infinite; }
 @keyframes breathe { 50% { opacity: .55; } }
@@ -368,7 +381,7 @@ textarea::placeholder { color: var(--text-3); }
 
   const el = {};
 
-  el.state = h("span", { class: "state", text: "Conectando…", title: "Reintentar", onclick: () => connect() });
+  el.state = h("span", { class: "state", text: "Conectando…", title: "Reintentar", onclick: () => (state.connected ? connect() : openOval()) });
   el.logo = h("span", { class: "logo" });
   const bar = h("header", { class: "bar" },
     el.logo,
@@ -395,15 +408,47 @@ textarea::placeholder { color: var(--text-3); }
       h("button", { "data-q": q, class: q === state.quality ? "on" : null, onclick: () => setQuality(q) }, label)));
   el.queueBtn = h("button", { class: "cta", onclick: sendClip }, I.plus(), "Mandar a la cola");
   el.jobs = h("div", { class: "jobs" });
+  el.preciseRow = h("label", { class: "check", title: "Corta en el fotograma exacto (recodifica los bordes, tarda un poco más)" }, el.precise, "Preciso (fotograma)");
+  // Quality, precise cut and the job list are shared: they move to whichever
+  // card is showing.
+  el.clipSlot = h("div", { class: "slot" }, el.preciseRow, el.quality);
+  el.clipJobs = h("div", { class: "slot" }, el.jobs);
   const clipCard = h("section", { class: "card" },
     h("div", { class: "label", text: "Clip actual" }),
     h("div", { class: "row" }, el.inBtn, el.outBtn, el.reset),
     el.range,
     h("div", { class: "times" }, el.timeIn, el.len, el.timeOut),
-    h("label", { class: "check", title: "Corta en el fotograma exacto (recodifica los bordes, tarda un poco más)" }, el.precise, "Preciso (fotograma)"),
-    el.quality,
+    el.clipSlot,
     el.queueBtn,
-    el.jobs,
+    el.clipJobs,
+  );
+
+  // Live stream (Twitch, Kick): parts are cut from the recording the site
+  // keeps while the stream runs, in seconds from the start of the stream.
+  el.liveClock = h("span", { class: "live-clock" });
+  el.liveIn = h("button", { class: "mark", title: "Marcar el inicio en este momento del directo", onclick: () => markLive("in") }, "[ IN");
+  el.liveOut = h("button", { class: "mark", title: "Marcar el final en este momento del directo", onclick: () => markLive("out") }, "OUT ]");
+  el.liveReset = h("button", { class: "dot reset", title: "Quitar el tramo", "aria-label": "Quitar el tramo", onclick: () => { state.liveIn = state.liveOut = null; renderLive(); } }, I.close());
+  el.liveTimes = h("div", { class: "times" });
+  el.liveLast = h("div", { class: "seg", role: "group", "aria-label": "Últimos minutos" },
+    ...[[1, "Último min"], [5, "5 min"], [15, "15 min"], [60, "1 h"]].map(([m, label]) =>
+      h("button", { title: `Los últimos ${m === 60 ? "60" : m} minutos del directo`, onclick: () => lastMinutes(m) }, label)));
+  el.liveSlot = h("div", { class: "slot" });
+  el.liveJobs = h("div", { class: "slot" });
+  el.liveQueue = h("button", { class: "cta", onclick: sendLiveClip }, I.plus(), "Mandar a la cola");
+  el.recordBtn = h("button", { class: "pill", title: "Graba el directo en Oval hasta que lo detengas", onclick: sendRecord }, h("span", { class: "rec-dot" }), "Grabar desde ahora");
+  el.fromStart = h("button", { class: "pill", title: "Todo lo emitido hasta ahora", onclick: sendFromStart }, I.down(), "Desde el inicio");
+  el.liveHint = h("div", { class: "hint" });
+  const liveCard = h("section", { class: "card hidden" },
+    h("div", { class: "label live-label" }, "En directo", el.liveClock),
+    h("div", { class: "row" }, el.liveIn, el.liveOut, el.liveReset),
+    el.liveTimes,
+    el.liveLast,
+    el.liveSlot,
+    el.liveQueue,
+    h("div", { class: "row two" }, el.recordBtn, el.fromStart),
+    el.liveHint,
+    el.liveJobs,
   );
 
   // Export
@@ -436,6 +481,7 @@ textarea::placeholder { color: var(--text-3); }
   );
 
   el.status = h("div", { class: "status", role: "status" });
+  el.getOval = h("a", { class: "mini get-oval hidden", href: "https://github.com/xXKuroiKenshiXx/Oval/releases/latest", target: "_blank", rel: "noopener" }, I.down(), "Descargar Oval");
   el.logText = h("pre");
   el.log = h("div", { class: "log closed" },
     h("div", { class: "log-head" },
@@ -445,7 +491,7 @@ textarea::placeholder { color: var(--text-3); }
     el.logText,
   );
 
-  const panel = h("div", { class: "panel", role: "dialog", "aria-label": "Oval" }, bar, clipCard, exportCard, el.note, dest, el.status, el.log);
+  const panel = h("div", { class: "panel", role: "dialog", "aria-label": "Oval" }, bar, clipCard, liveCard, exportCard, el.note, dest, el.status, el.getOval, el.log);
   const bubble = h("button", { class: "bubble hidden", title: "Abrir Oval", "aria-label": "Abrir Oval", onclick: () => setMinimized(false) }, h("span", { text: "oval" }));
   root.append(panel, bubble);
   (document.body || document.documentElement).append(host);
@@ -548,8 +594,9 @@ textarea::placeholder { color: var(--text-3); }
 
   function renderStatus() {
     el.state.className = "state" + (state.connected ? " on" : state.connected === false ? " off" : "");
-    el.state.textContent = state.connected ? "Oval" : state.connected === false ? "Abre Oval" : "Conectando…";
-    el.state.title = state.connected ? "Conectado con la app de Oval" : "Abre la app de Oval en este equipo y toca para reintentar";
+    el.state.textContent = state.connected ? "Oval" : state.connected === false ? "Abrir Oval" : "Conectando…";
+    el.state.title = state.connected ? "Conectado con la app de Oval" : "Abre la app de Oval de este equipo";
+    el.getOval.classList.toggle("hidden", !!state.connected || !state.missing);
   }
 
   /* ---------- Destination ---------- */
@@ -686,9 +733,31 @@ textarea::placeholder { color: var(--text-3); }
 
   async function ensureConnected() {
     if (state.connected) return true;
-    log("Conectando con Oval…");
     if (await connect()) return true;
-    log("Abre la app de Oval en este equipo y vuelve a intentarlo", "error");
+    return openOval();
+  }
+
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+  /** Starts the Oval app through its oval:// link, which every copy of
+   *  Oval (installed or portable) registers for itself when it runs. */
+  async function openOval() {
+    log("Abriendo Oval…");
+    const link = h("a", { href: "oval://open", style: "display:none" });
+    root.append(link);
+    link.click();
+    link.remove();
+    for (let i = 0; i < 25; i++) {
+      await sleep(1000);
+      if (await connect()) {
+        state.missing = false;
+        renderStatus();
+        return true;
+      }
+    }
+    state.missing = true;
+    renderStatus();
+    log("No se pudo abrir Oval. Si no lo tienes, descárgalo; si lo tienes, ábrelo una vez y luego este botón lo abrirá.", "error");
     return false;
   }
 
@@ -722,6 +791,7 @@ textarea::placeholder { color: var(--text-3); }
   }
 
   async function sendFull() {
+    if (state.live) return sendFromStart();
     if (!(await ensureConnected())) return;
     try {
       const job = await oval("/v1/download", downloadBody({ title: pageTitle() }));
@@ -748,10 +818,11 @@ textarea::placeholder { color: var(--text-3); }
   }
 
   function sendTranscript() {
-    const s = section();
+    const live = state.live && state.live.vod;
+    const s = live ? liveSection(true) : section();
     return busy(el.transcriptBtn, s ? "Bajando la transcripción del tramo…" : "Bajando la transcripción…", async () => {
       const res = await oval("/v1/transcript", {
-        url: pageUrl(),
+        url: live ? state.live.vod : pageUrl(),
         format: state.format,
         section: s || undefined,
         note: el.note.value.trim() || undefined,
@@ -784,10 +855,180 @@ textarea::placeholder { color: var(--text-3); }
     }, 450);
   }
 
+  /* ---------- Live streams ---------- */
+
+  // Twitch and Kick players run a few seconds behind the broadcast.
+  const PLAYER_DELAY = 4;
+  // The site's recording trails the stream; wait this much past a section's end.
+  const RECORDING_DELAY = 25;
+
+  const isStreamSite = () => /(^|\.)(twitch\.tv|kick\.com)$/.test(location.hostname);
+
+  /** Seconds into the broadcast of what the player shows now. */
+  function liveNow() {
+    if (!state.live || !state.live.started_at) return null;
+    return Math.max(0, Date.now() / 1000 - PLAYER_DELAY - state.live.started_at);
+  }
+
+  function clock(sec) {
+    sec = Math.max(0, Math.floor(sec || 0));
+    const hh = Math.floor(sec / 3600);
+    const mm = String(Math.floor((sec % 3600) / 60)).padStart(2, "0");
+    const ss = String(sec % 60).padStart(2, "0");
+    return hh ? `${hh}:${mm}:${ss}` : `${Number(mm)}:${ss}`;
+  }
+
+  async function checkLive() {
+    const url = pageUrl();
+    if (!isStreamSite() || !state.connected) {
+      setLive(null);
+      return;
+    }
+    try {
+      const info = await oval("/v1/live", { url });
+      if (url !== pageUrl()) return; // navigated meanwhile
+      setLive(info && info.live ? info : null);
+    } catch (err) {
+      setLive(null);
+      log(String(err.message || err), "warn");
+    }
+  }
+
+  function setLive(info) {
+    const was = !!state.live;
+    state.live = info;
+    if (was !== !!info) {
+      state.liveIn = state.liveOut = null;
+      if (info) log(`En directo: ${info.title || pageTitle()}`);
+    }
+    liveCard.classList.toggle("hidden", !info);
+    clipCard.classList.toggle("hidden", !!info);
+    (info ? el.liveSlot : el.clipSlot).append(el.preciseRow, el.quality);
+    (info ? el.liveJobs : el.clipJobs).append(el.jobs);
+    el.fullBtn.lastChild.textContent = info ? "Desde el inicio" : "Vídeo completo";
+    renderLive();
+  }
+
+  function markLive(which) {
+    const t = liveNow();
+    if (t == null) return log("No se sabe cuándo empezó este directo", "warn");
+    if (which === "in") {
+      state.liveIn = t;
+      if (state.liveOut != null && state.liveOut <= t) state.liveOut = null;
+    } else {
+      state.liveOut = t;
+      if (state.liveIn != null && state.liveIn >= t) state.liveIn = null;
+    }
+    renderLive();
+  }
+
+  function lastMinutes(minutes) {
+    const t = liveNow();
+    if (t == null) return;
+    state.liveIn = Math.max(0, t - minutes * 60);
+    state.liveOut = t;
+    renderLive();
+  }
+
+  /** The marked part; an open end means "up to now". `ready` keeps it inside
+   *  what the site has already saved. */
+  function liveSection(ready = false) {
+    const now = liveNow();
+    if (now == null || (state.liveIn == null && state.liveOut == null)) return null;
+    let end = state.liveOut == null ? now : state.liveOut;
+    if (ready) end = Math.min(end, now - RECORDING_DELAY);
+    const start = state.liveIn == null ? Math.max(0, end - 60) : state.liveIn;
+    return end - start >= 1 ? { start, end } : null;
+  }
+
+  function renderLive() {
+    if (!state.live) return;
+    const now = liveNow();
+    el.liveClock.textContent = now == null ? "" : clock(now);
+    const s = liveSection();
+    el.liveIn.classList.toggle("set", state.liveIn != null);
+    el.liveOut.classList.toggle("set", state.liveOut != null);
+    el.liveTimes.replaceChildren(
+      h("span", { text: state.liveIn == null ? "--:--" : clock(state.liveIn) }),
+      h("b", { text: s ? `${Math.round(s.end - s.start)} s` : "marca un tramo" }),
+      h("span", { text: state.liveOut == null ? (state.liveIn == null ? "--:--" : "ahora") : clock(state.liveOut) }),
+    );
+    const vod = !!state.live.vod;
+    el.liveReset.disabled = !s;
+    el.liveQueue.disabled = !s || !vod;
+    el.fromStart.disabled = !vod;
+    for (const b of el.liveLast.querySelectorAll("button")) b.disabled = !vod;
+    el.liveHint.textContent = vod
+      ? "Los tramos salen de la grabación del directo; los más recientes tardan unos segundos."
+      : "Este canal no guarda sus directos: solo se puede grabar desde ahora.";
+  }
+
+  async function sendLiveClip() {
+    const s = liveSection();
+    if (!s || !state.live || !state.live.vod || !(await ensureConnected())) return;
+    const live = state.live;
+    const label = `${clock(s.start)} → ${clock(s.end)} (${Math.round(s.end - s.start)} s)`;
+    state.liveIn = state.liveOut = null;
+    renderLive();
+    // Wait until the site has saved the end of the part.
+    while (liveNow() != null && liveNow() < s.end + RECORDING_DELAY) {
+      setStatus(`Esperando a que se guarde ${label}… ${Math.ceil(s.end + RECORDING_DELAY - liveNow())} s`);
+      await sleep(1000);
+    }
+    try {
+      const job = await oval("/v1/download", downloadBody({
+        url: live.vod,
+        section: s,
+        precise: el.precise.checked,
+        title: `${live.title || pageTitle()} · ${clock(s.start)}–${clock(s.end)}`,
+      }));
+      track(job, label);
+      log(`Tramo del directo en la cola: ${label}`);
+    } catch (err) {
+      log(String(err.message || err), "error");
+    }
+  }
+
+  async function sendFromStart() {
+    const live = state.live;
+    const now = liveNow();
+    if (!live || !live.vod || now == null || !(await ensureConnected())) return;
+    const s = { start: 0, end: Math.max(1, now - RECORDING_DELAY) };
+    try {
+      const job = await oval("/v1/download", downloadBody({
+        url: live.vod,
+        section: s,
+        title: `${live.title || pageTitle()} · hasta ${clock(s.end)}`,
+      }));
+      track(job, `Desde el inicio hasta ${clock(s.end)}`);
+      log("Directo desde el inicio en la cola");
+    } catch (err) {
+      log(String(err.message || err), "error");
+    }
+  }
+
+  async function sendRecord() {
+    if (!(await ensureConnected())) return;
+    try {
+      const job = await oval("/v1/download", downloadBody({
+        live: true,
+        title: `${(state.live && state.live.title) || pageTitle()} · directo`,
+      }));
+      track(job, "Grabación del directo");
+      log("Grabando el directo en Oval");
+    } catch (err) {
+      log(String(err.message || err), "error");
+    }
+  }
+
   /* ---------- Jobs ---------- */
 
   function jobMeta(j) {
     const pct = j.progress > 0 ? `${Math.round(j.progress * 100)}%` : "";
+    if (j.live && (j.status === "downloading" || j.status === "starting")) {
+      return ["Grabando", clock(j.elapsed), bytes(j.downloaded)].filter(Boolean).join(" · ");
+    }
+    if (j.live && j.status === "processing") return "Guardando la grabación…";
     switch (j.status) {
       case "queued": return "En la cola de Oval";
       case "starting": return "Empezando…";
@@ -811,6 +1052,11 @@ textarea::placeholder { color: var(--text-3); }
     x.addEventListener("click", async (e) => {
       e.stopPropagation();
       const j = entry.job;
+      if (j.live && j.status !== "done" && j.status !== "error") {
+        // A recording is stopped and kept, like the ■ button in Oval.
+        try { await oval("/v1/stop", { id: j.id }); log(`Grabación detenida: ${label}`); } catch (err) { log(String(err.message || err), "error"); }
+        return;
+      }
       if (j.status !== "done" && j.status !== "error") {
         try { await oval("/v1/cancel", { id: j.id }); log(`Cancelado: ${label}`); } catch (err) { log(String(err.message || err), "error"); }
       }
@@ -829,12 +1075,12 @@ textarea::placeholder { color: var(--text-3); }
 
   function renderJob(entry) {
     const j = entry.job;
-    entry.row.className = `job ${j.status}`;
+    entry.row.className = `job ${j.status}${j.live ? " live" : ""}`;
     const full = j.status === "done" || j.status === "error";
     entry.ring.style.setProperty("--p", full ? 1 : j.progress || 0);
     entry.ring.firstChild.replaceChildren(j.status === "done" ? I.check() : j.status === "error" ? I.bang() : "");
     entry.meta.textContent = jobMeta(j);
-    entry.x.title = full ? "Quitar de la lista" : "Cancelar";
+    entry.x.title = full ? "Quitar de la lista" : j.live ? "Detener y guardar" : "Cancelar";
   }
 
   /** Average progress of what is running, shown on the logo and the bubble. */
@@ -890,6 +1136,7 @@ textarea::placeholder { color: var(--text-3); }
     state.clipIn = state.clipOut = null;
     el.note.value = "";
     renderPage();
+    checkLive();
   }
 
   function renderPage() {
@@ -906,6 +1153,9 @@ textarea::placeholder { color: var(--text-3); }
     if (!host.isConnected) (document.body || document.documentElement).append(host);
     if (host.style.display !== "none" && !state.minimized) renderClip();
   }, 1500);
+  setInterval(() => {
+    if (state.live && host.style.display !== "none" && !state.minimized) renderLive();
+  }, 1000);
 
   /* ---------- Start ---------- */
 

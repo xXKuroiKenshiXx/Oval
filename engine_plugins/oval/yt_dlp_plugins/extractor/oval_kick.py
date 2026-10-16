@@ -16,7 +16,7 @@ from yt_dlp.extractor.kick import KickBaseIE, KickClipIE, KickVODIE
 from yt_dlp.networking.exceptions import HTTPError
 from yt_dlp.utils import ExtractorError, float_or_none, parse_duration, parse_iso8601, url_or_none
 
-__all__ = ['OvalKickChannelIE', 'OvalKickVodIE']
+__all__ = ['OvalKickChannelIE', 'OvalKickLiveInfoIE', 'OvalKickVodIE']
 
 # Kick names stream languages in English.
 LANGUAGES = {
@@ -197,3 +197,31 @@ class OvalKickVodIE(KickVODIE):
             info['language'] = LANGUAGES.get(str(row.get('language') or '').lower())
 
         return info
+
+
+class OvalKickLiveInfoIE(KickBaseIE):
+    """`oval:kick-live:<channel>`: whether the channel is live, when the
+    broadcast started and the recording Kick keeps while it runs. Oval's
+    browser extension cuts parts of a live stream from that recording."""
+
+    IE_NAME = 'oval:kick:live-info'
+    _VALID_URL = r'oval:kick-live:(?P<id>[\w-]+)$'
+
+    def _real_extract(self, url):
+        slug = self._match_id(url)
+        channel = self._call_api(f'v2/channels/{slug}', slug, note='Downloading Kick channel')
+        stream = channel.get('livestream') if isinstance(channel, dict) else None
+        info = {'id': slug, 'title': slug, 'live_status': 'not_live', 'formats': []}
+        if not isinstance(stream, dict) or not stream.get('is_live'):
+            return info
+        videos = self._call_api(f'v2/channels/{slug}/videos', slug, note='Downloading Kick videos', fatal=False)
+        current = next((v for v in videos if isinstance(v, dict) and v.get('is_live')), {}) if isinstance(videos, list) else {}
+        uuid = (current.get('video') or {}).get('uuid')
+        started = current.get('start_time') or stream.get('start_time') or stream.get('created_at')
+        return {
+            **info,
+            'title': stream.get('session_title') or slug,
+            'live_status': 'is_live',
+            'release_timestamp': parse_iso8601(started.replace(' ', 'T') + 'Z') if started else None,
+            'vod_url': f'https://kick.com/{slug}/videos/{uuid}' if uuid else None,
+        }

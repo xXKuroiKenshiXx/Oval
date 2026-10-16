@@ -55,18 +55,29 @@ impl Info {
 }
 
 pub async fn info(app: &AppHandle, url: &str) -> Result<Info, String> {
+    let mut args: Vec<String> = ["--no-playlist", "--skip-download"]
+        .map(String::from)
+        .to_vec();
+    args.extend(youtube_args(url));
+    dump_json(app, args, url).await
+}
+
+/// yt-dlp's JSON for `url` (`--dump-single-json` plus `extra` arguments).
+pub async fn dump_json<T: serde::de::DeserializeOwned>(
+    app: &AppHandle,
+    extra: Vec<String>,
+    url: &str,
+) -> Result<T, String> {
     let mut args: Vec<String> = [
         "--ignore-config",
         "--encoding",
         "utf-8",
         "--no-warnings",
         "--dump-single-json",
-        "--no-playlist",
-        "--skip-download",
     ]
     .map(String::from)
     .to_vec();
-    args.extend(youtube_args(url));
+    args.extend(extra);
     args.push("--".into());
     args.push(url.into());
     let mut task = engine::ytdlp(app, args).await?;
@@ -289,7 +300,7 @@ fn hls_segments(playlist: &str) -> Vec<(f64, f64, String)> {
 }
 
 /// Some CDNs (Kick's) refuse requests without a browser user agent.
-fn client() -> &'static reqwest::Client {
+pub(crate) fn client() -> &'static reqwest::Client {
     static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
     CLIENT.get_or_init(|| {
         reqwest::Client::builder()

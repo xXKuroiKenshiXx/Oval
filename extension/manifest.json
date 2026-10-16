@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Oval",
   "short_name": "Oval",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "description": "Descarga vídeos, clips, transcripciones y miniaturas con Oval desde cualquier página.",
   "homepage_url": "https://github.com/xXKuroiKenshiXx/Oval",
   "icons": {

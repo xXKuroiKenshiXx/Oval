@@ -58,7 +58,8 @@ Y además:
 - **Windows, Linux, Android, iPhone y iPad**.
 - **Extensión para el navegador** (Chrome, Edge, Brave, Opera, Firefox y Safari): un panel
   flotante para bajar el vídeo que estás viendo, un clip con entrada y salida, la
-  transcripción (Markdown, texto, SRT o VTT) o la miniatura, a la carpeta que elijas.
+  transcripción (Markdown, texto, SRT o VTT) o la miniatura, a la carpeta que elijas. En
+  directos de Twitch y Kick baja tramos del directo o lo graba, y abre Oval si está cerrado.
   Ver [extension/README.md](extension/README.md).
 - **Resistente a los bloqueos de YouTube**: si YouTube pide "confirmar que no eres un bot", Oval
   cambia solo a otros reproductores de YouTube durante un rato y reintenta, sin pedirte sesión.
@@ -212,6 +213,7 @@ src/
   engine.rs      ejecuta yt-dlp: proceso en escritorio, motor integrado en Android e iOS
   bridge.rs      servidor local para la extensión del navegador
   extras.rs      transcripciones y miniaturas que pide la extensión
+  live.rs        directos de Twitch y Kick: inicio y grabación en curso
   transcript.rs  subtítulos VTT a Markdown, texto, SRT o VTT limpio
 plugins/oval-engine/   motor en el teléfono: youtubedl-android (Kotlin) y Python embebido (Swift)
 engine_plugins/  código Python que usa yt-dlp (extractor de Kick, motor de iOS)

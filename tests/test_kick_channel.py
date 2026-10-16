@@ -95,5 +95,25 @@ class KickVodTests(unittest.TestCase):
         self.assertEqual(module.stream_thumbnails('https://example.com/x.m3u8'), [])
 
 
+class KickLiveInfoTests(unittest.TestCase):
+    def test_live_channel_points_to_its_recording(self):
+        ie = module.OvalKickLiveInfoIE()
+        ie._call_api = Mock(side_effect=[
+            {'livestream': {'is_live': True, 'session_title': 'Directo', 'start_time': '2026-10-16 15:19:27'}},
+            [{'is_live': True, 'start_time': '2026-10-16 15:19:27', 'video': {'uuid': 'vod-uuid'}}],
+        ])
+        info = ie._real_extract('oval:kick-live:maherco')
+        self.assertEqual(info['live_status'], 'is_live')
+        self.assertEqual(info['release_timestamp'], 1792163967)
+        self.assertEqual(info['vod_url'], 'https://kick.com/maherco/videos/vod-uuid')
+
+    def test_offline_channel(self):
+        ie = module.OvalKickLiveInfoIE()
+        ie._call_api = Mock(return_value={'livestream': None})
+        self.assertEqual(ie._real_extract('oval:kick-live:x')['live_status'], 'not_live')
+        self.assertTrue(ie.suitable('oval:kick-live:some_name'))
+        self.assertFalse(ie.suitable('https://kick.com/some_name'))
+
+
 if __name__ == '__main__':
     unittest.main()

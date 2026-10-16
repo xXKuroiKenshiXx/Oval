@@ -9,6 +9,8 @@ mod engine;
 #[cfg(desktop)]
 mod extras;
 #[cfg(desktop)]
+mod live;
+#[cfg(desktop)]
 mod platform;
 mod settings;
 #[cfg(desktop)]
@@ -281,9 +283,17 @@ async fn selftest(app: AppHandle, url: String) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let builder = tauri::Builder::default().plugin(tauri_plugin_clipboard_manager::init());
+    let builder = tauri::Builder::default();
+    // One Oval at a time: starting it again (or opening an oval:// link, as
+    // the browser extension does) brings the running one to the front.
     #[cfg(desktop)]
-    let builder = builder.plugin(tauri_plugin_dialog::init());
+    let builder = builder
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            platform::bring_to_front(app)
+        }))
+        .plugin(tauri_plugin_deep_link::init())
+        .plugin(tauri_plugin_dialog::init());
+    let builder = builder.plugin(tauri_plugin_clipboard_manager::init());
     #[cfg(mobile)]
     let builder = builder.plugin(tauri_plugin_oval_engine::init());
     builder
@@ -297,6 +307,15 @@ pub fn run() {
             }
             #[cfg(desktop)]
             bridge::start(app.handle().clone());
+            // oval:// opens this copy of Oval, wherever it lives (installed or
+            // portable): registered again on every start so it follows moves.
+            #[cfg(any(windows, target_os = "linux"))]
+            {
+                use tauri_plugin_deep_link::DeepLinkExt;
+                if let Err(e) = app.deep_link().register("oval") {
+                    eprintln!("Oval: oval:// link not registered: {e}");
+                }
+            }
             #[cfg(windows)]
             {
                 let handle = app.handle().clone();
