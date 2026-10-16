@@ -225,12 +225,22 @@ async fn selftest(app: AppHandle, url: String) {
         url,
         ..NewJob::default()
     };
+    println!("OVAL_SELFTEST_STEP started");
     let id = queue.add(&app, vec![item], Mode::Video, Some("360"), None, false)[0].id;
-    for _ in 0..900 {
+    for second in 0..900 {
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
         let Some(job) = queue.list().into_iter().find(|j| j.id == id) else {
             break;
         };
+        if second % 15 == 0 {
+            let engine = engine::status();
+            println!(
+                "OVAL_SELFTEST_STEP {:?} {:.0}% engine: {}",
+                job.status,
+                job.progress * 100.0,
+                engine.message
+            );
+        }
         match job.status {
             Status::Done => {
                 println!("OVAL_SELFTEST ok {}", job.path.unwrap_or_default());

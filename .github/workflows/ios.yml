@@ -54,10 +54,11 @@ jobs:
             log="$RUNNER_TEMP/run.log"
             : > "$log"
             SIMCTL_CHILD_OVAL_SELFTEST="$1" xcrun simctl launch --console-pty --terminate-running-process "$udid" io.github.xxkuroikenshixx.oval > "$log" 2>&1 &
-            for _ in $(seq 900); do grep -q OVAL_SELFTEST "$log" && break; sleep 1; done
+            for _ in $(seq 600); do grep -qE "OVAL_SELFTEST (ok|error|timeout)" "$log" && break; sleep 1; done
             xcrun simctl terminate "$udid" io.github.xxkuroikenshixx.oval || true
             cat "$log" >> "$RUNNER_TEMP/sim.log"
-            grep -m1 OVAL_SELFTEST "$log" > "$RUNNER_TEMP/result" || echo "OVAL_SELFTEST no answer" > "$RUNNER_TEMP/result"
+            grep -m1 -E "OVAL_SELFTEST (ok|error|timeout)" "$log" > "$RUNNER_TEMP/result" || echo "OVAL_SELFTEST no answer" > "$RUNNER_TEMP/result"
+            grep OVAL_SELFTEST_STEP "$log" || true
             cat "$RUNNER_TEMP/result"
             grep -q "OVAL_SELFTEST ok" "$RUNNER_TEMP/result"
           }
@@ -66,6 +67,11 @@ jobs:
           # YouTube: JavaScriptCore challenges and the AVFoundation merge. CI
           # machines are often blocked by YouTube, so this only warns.
           check "https://www.youtube.com/watch?v=jNQXAC9IVRw" || echo "::warning::YouTube on the simulator: $(cat "$RUNNER_TEMP/result")"
+      - name: Simulator system log
+        if: failure()
+        run: |
+          xcrun simctl spawn booted log show --last 30m --style compact --predicate 'process == "Oval" OR subsystem CONTAINS "oval"' > "$RUNNER_TEMP/oslog.txt" || true
+          tail -n 200 "$RUNNER_TEMP/oslog.txt"
       - name: Device build
         run: tauri ios build --ci --no-sign --target aarch64
       - name: Collect
@@ -81,5 +87,7 @@ jobs:
         if: failure()
         with:
           name: ios-logs
-          path: ${{ runner.temp }}/sim.log
+          path: |
+            ${{ runner.temp }}/sim.log
+            ${{ runner.temp }}/oslog.txt
           if-no-files-found: ignore
