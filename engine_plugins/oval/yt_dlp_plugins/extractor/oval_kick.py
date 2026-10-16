@@ -1,13 +1,70 @@
-"""Public Kick channel listings, using yt-dlp's Kick HTTP client.
+"""Kick additions on top of yt-dlp's built-in extractors.
 
-Only collection URLs match this extractor. Individual VODs, clips and live
-channels continue through yt-dlp's maintained built-in Kick extractors.
+- Channel listings (videos and clips), using yt-dlp's Kick HTTP client.
+- VODs: Kick's website now links videos by an ID its old API doesn't know
+  (404). Those are read from the page itself, and every VOD gets Kick's
+  automatic subtitles from its HLS stream.
+
+Clips and live channels continue through yt-dlp's built-in extractors.
 """
 
-from yt_dlp.extractor.kick import KickBaseIE, KickClipIE, KickVODIE
-from yt_dlp.utils import ExtractorError, float_or_none, url_or_none
+import json
+import re
+import urllib.parse
 
-__all__ = ['OvalKickChannelIE']
+from yt_dlp.extractor.kick import KickBaseIE, KickClipIE, KickVODIE
+from yt_dlp.networking.exceptions import HTTPError
+from yt_dlp.utils import ExtractorError, float_or_none, parse_duration, parse_iso8601, url_or_none
+
+__all__ = ['OvalKickChannelIE', 'OvalKickVodIE']
+
+# Kick names stream languages in English.
+LANGUAGES = {
+    'arabic': 'ar', 'chinese': 'zh', 'dutch': 'nl', 'english': 'en', 'french': 'fr', 'german': 'de',
+    'italian': 'it', 'japanese': 'ja', 'korean': 'ko', 'polish': 'pl', 'portuguese': 'pt',
+    'russian': 'ru', 'spanish': 'es', 'turkish': 'tr',
+}
+
+
+def video_object(webpage):
+    """The schema.org VideoObject that Kick puts in every VOD page."""
+    for raw in re.findall(r'<script[^>]+type="application/ld\+json"[^>]*>(.+?)</script>', webpage, re.S):
+        try:
+            data = json.loads(raw)
+        except ValueError:
+            continue
+        for node in data.get('@graph', [data]) if isinstance(data, dict) else data:
+            if isinstance(node, dict) and node.get('@type') == 'VideoObject' and node.get('contentUrl'):
+                return node
+    return None
+
+
+def stream_thumbnails(source):
+    """Kick keeps VOD thumbnails on images.kick.com under the same IDs as the
+    stream (.../ivs/v1/<account>/<content>/<y>/<m>/<d>/<h>/<min>/<session>/...)."""
+    match = re.search(r'/ivs/v1/\d+/(\w+)/\d{4}/\d+/\d+/\d+/\d+/(\w+)/', source or '')
+    if not match:
+        return []
+    base = 'https://images.kick.com/video_thumbnails/{}/{}'.format(*match.groups())
+    return [{'url': f'{base}/{size}.webp', 'height': size, 'preference': size}
+            for size in (480, 720, 1080)]
+
+
+def hls_subtitles(master, master_url):
+    """Subtitle tracks listed in an HLS master playlist, as yt-dlp subtitles."""
+    subtitles = {}
+    for line in master.splitlines():
+        if not line.startswith('#EXT-X-MEDIA:') or 'TYPE=SUBTITLES' not in line:
+            continue
+        attrs = dict(re.findall(r'([A-Z-]+)="([^"]*)"', line))
+        if attrs.get('URI') and attrs.get('LANGUAGE'):
+            subtitles.setdefault(attrs['LANGUAGE'], []).append({
+                'url': urllib.parse.urljoin(master_url, attrs['URI']),
+                'ext': 'vtt',
+                'protocol': 'm3u8_native',
+                'name': attrs.get('NAME'),
+            })
+    return subtitles
 
 
 class OvalKickChannelIE(KickBaseIE):
@@ -83,3 +140,60 @@ class OvalKickChannelIE(KickBaseIE):
         return self.playlist_result(
             self._entries(channel, section), playlist_id=f'{channel}-{section}',
             playlist_title=f'{channel} - {section}', uploader=channel, channel=channel)
+
+
+class OvalKickVodIE(KickVODIE):
+    IE_NAME = 'oval:kick:vod'
+    _VALID_URL = r'https?://(?:www\.)?kick\.com/(?P<channel>[\w-]+)/videos/(?P<id>[\da-f]{8}-(?:[\da-f]{4}-){3}[\da-f]{12})'
+
+    def _from_page(self, url, channel, video_id):
+        webpage = self._download_webpage(url, video_id, impersonate=True)
+        video = video_object(webpage)
+        if not video:
+            raise ExtractorError('Kick did not describe this video', expected=True)
+        thumbnail = video.get('thumbnailUrl')
+        if isinstance(thumbnail, list):
+            thumbnail = thumbnail[0] if thumbnail else None
+        return {
+            'id': video_id,
+            'title': video.get('name') or video_id,
+            'formats': self._extract_m3u8_formats(video['contentUrl'], video_id, 'mp4'),
+            'thumbnail': url_or_none(thumbnail),
+            'duration': parse_duration(video.get('duration')),
+            'timestamp': parse_iso8601(video.get('uploadDate')),
+            'channel': channel,
+            'uploader': channel,
+        }
+
+    def _listing(self, channel, source):
+        """This video's row in the channel's recent videos (best effort): it
+        has the stream's language and thumbnail."""
+        try:
+            rows = self._call_api(f'v2/channels/{channel}/videos', channel, note='Downloading Kick videos', fatal=False)
+        except ExtractorError:
+            return {}
+        for row in rows if isinstance(rows, list) else []:
+            if isinstance(row, dict) and row.get('source') == source:
+                return row
+        return {}
+
+    def _real_extract(self, url):
+        channel, video_id = self._match_valid_url(url).group('channel', 'id')
+        try:
+            info = super()._real_extract(url)
+        except ExtractorError as e:
+            if not isinstance(e.cause, HTTPError) or e.cause.status != 404:
+                raise
+            info = self._from_page(url, channel, video_id)
+        source = next((f.get('manifest_url') for f in info.get('formats') or [] if f.get('manifest_url')), None)
+        if source:
+            master = self._download_webpage(source, video_id, note='Downloading subtitle list', fatal=False)
+            if master:
+                info['subtitles'] = hls_subtitles(master, source)
+            # The page's own thumbnail sits behind a bot check; these don't.
+            info['thumbnails'] = stream_thumbnails(source) + (
+                [{'url': info['thumbnail'], 'preference': -1}] if info.get('thumbnail') else [])
+            row = self._listing(channel, source)
+            info['language'] = LANGUAGES.get(str(row.get('language') or '').lower())
+
+        return info

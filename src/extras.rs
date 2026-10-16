@@ -144,11 +144,8 @@ pub async fn save_transcript(
     let info = info(app, req.url).await?;
     let track =
         pick_track(&info, req.lang).ok_or("Este vídeo no tiene subtítulos ni transcripción")?;
-    let vtt = fetch(&track.url).await?;
-    let lines = transcript::clip(
-        transcript::parse_vtt(&String::from_utf8_lossy(&vtt)),
-        req.section,
-    );
+    let vtt = subtitles(&track.url, req.section).await?;
+    let lines = transcript::clip(transcript::parse_vtt(&vtt), req.section);
     if lines.is_empty() {
         return Err("La transcripción está vacía en ese tramo".into());
     }
@@ -195,13 +192,17 @@ pub async fn save_thumbnail(app: &AppHandle, url: &str, folder: &Path) -> Result
     candidates.sort_by_key(|u| !matches!(ext_of(u).as_str(), "jpg" | "jpeg"));
     candidates.extend(info.thumbnail.clone());
     let mut found = None;
+    let mut error = "Este vídeo no tiene miniatura".to_string();
     for url in candidates.iter().filter(|u| u.starts_with("http")) {
-        if let Ok(bytes) = fetch(url).await {
-            found = Some((url.clone(), bytes));
-            break;
+        match fetch(url).await {
+            Ok(bytes) => {
+                found = Some((url.clone(), bytes));
+                break;
+            }
+            Err(e) => error = e,
         }
     }
-    let (best, bytes) = found.ok_or("Este vídeo no tiene miniatura")?;
+    let (best, bytes) = found.ok_or(error)?;
     let ext = match ext_of(&best).as_str() {
         "png" => "png",
         "webp" => "webp",
@@ -236,8 +237,72 @@ async fn webp_to_jpg(app: &AppHandle, webp: &Path) -> Option<PathBuf> {
     }
 }
 
+/// One subtitle track as WebVTT text. Streaming sites (Kick) cut their
+/// subtitles into HLS segments; then only the segments of `section` (or all
+/// of them) are fetched and joined.
+async fn subtitles(url: &str, section: Option<Section>) -> Result<String, String> {
+    use futures_util::StreamExt;
+
+    let text = String::from_utf8_lossy(&fetch(url).await?).into_owned();
+    if !text.starts_with("#EXTM3U") {
+        return Ok(text);
+    }
+    let base = reqwest::Url::parse(url).map_err(|e| e.to_string())?;
+    let wanted = |start: f64, end: f64| {
+        section.map_or(true, |s| end >= s.start - 1.0 && start <= s.end + 1.0)
+    };
+    let segments: Vec<String> = hls_segments(&text)
+        .into_iter()
+        .filter(|(start, end, _)| wanted(*start, *end))
+        .filter_map(|(_, _, uri)| base.join(&uri).ok().map(String::from))
+        .collect();
+    let parts: Vec<Result<Vec<u8>, String>> = futures_util::stream::iter(segments)
+        .map(|u| async move { fetch(&u).await })
+        .buffered(16)
+        .collect()
+        .await;
+    let mut vtt = String::new();
+    for part in parts {
+        vtt.push_str(&String::from_utf8_lossy(&part?));
+        vtt.push_str("\n\n");
+    }
+    Ok(vtt)
+}
+
+/// (start, end, uri) of each segment in an HLS media playlist.
+fn hls_segments(playlist: &str) -> Vec<(f64, f64, String)> {
+    let mut out = Vec::new();
+    let (mut t, mut length) = (0.0, 0.0);
+    for line in playlist.lines().map(str::trim) {
+        if let Some(rest) = line.strip_prefix("#EXTINF:") {
+            length = rest
+                .split(',')
+                .next()
+                .and_then(|d| d.parse().ok())
+                .unwrap_or(0.0);
+        } else if !line.is_empty() && !line.starts_with('#') {
+            out.push((t, t + length, line.to_string()));
+            t += length;
+        }
+    }
+    out
+}
+
+/// Some CDNs (Kick's) refuse requests without a browser user agent.
+fn client() -> &'static reqwest::Client {
+    static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+    CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Safari/537.36")
+            .build()
+            .unwrap_or_default()
+    })
+}
+
 async fn fetch(url: &str) -> Result<Vec<u8>, String> {
-    let resp = reqwest::get(url)
+    let resp = client()
+        .get(url)
+        .send()
         .await
         .and_then(|r| r.error_for_status())
         .map_err(|e| format!("No se pudo descargar: {e}"))?;
@@ -293,6 +358,26 @@ mod tests {
             ext: ext.into(),
             url: key.into(),
         }]
+    }
+
+    #[test]
+    fn hls_segments_have_times() {
+        let playlist = "#EXTM3U
+#EXT-X-TARGETDURATION:13
+#EXTINF:11.5,
+0.vtt
+#EXT-X-PROGRAM-DATE-TIME:x
+#EXTINF:10,
+1.vtt
+#EXT-X-ENDLIST
+";
+        assert_eq!(
+            hls_segments(playlist),
+            [
+                (0.0, 11.5, "0.vtt".to_string()),
+                (11.5, 21.5, "1.vtt".to_string())
+            ]
+        );
     }
 
     #[test]

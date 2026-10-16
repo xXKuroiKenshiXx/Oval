@@ -47,9 +47,30 @@ pub struct Line {
     pub start: f64,
     pub end: f64,
     pub text: String,
+    /// The caption as last shown, which later cues are compared with
+    /// (`text` loses its end when the next line rewrites it).
+    shown: String,
 }
 
-/// Every distinct caption line, in order.
+/// Lowercase letters and digits of each word, so a caption that only gained
+/// punctuation or accents still compares equal.
+fn words(text: &str) -> Vec<String> {
+    text.split_whitespace()
+        .map(|w| {
+            w.chars()
+                .filter(|c| c.is_alphanumeric())
+                .flat_map(char::to_lowercase)
+                .collect()
+        })
+        .collect()
+}
+
+/// Every distinct caption line, in order. Captions come in three shapes:
+/// - subtitles, sometimes two rows per cue;
+/// - YouTube's automatic captions, which repeat the previous row while the
+///   next one scrolls in;
+/// - Kick's, where one line grows word by word, gets rewritten as it grows
+///   and the next line starts with the tail of the previous one.
 pub fn parse_vtt(vtt: &str) -> Vec<Line> {
     let mut lines: Vec<Line> = Vec::new();
     let mut timing: Option<(f64, f64)> = None;
@@ -69,25 +90,79 @@ pub fn parse_vtt(vtt: &str) -> Vec<Line> {
         }
         let Some((start, end)) = timing else { continue };
         let text = strip_tags(raw);
-        if text.is_empty() {
+        let new = words(&text);
+        if new.is_empty() {
             continue;
         }
-        match lines.last_mut() {
-            // The same line still on screen: just extend it.
-            Some(last) if last.text == text || last.text.ends_with(&format!(" {text}")) => {
-                last.end = last.end.max(end)
+        let Some(last) = lines.last_mut() else {
+            lines.push(Line {
+                start,
+                end,
+                text: text.clone(),
+                shown: text,
+            });
+            added = true;
+            continue;
+        };
+        let old = words(&last.shown);
+        let shared = old.len().min(new.len()).min(4);
+        if added {
+            // Second row of the same cue.
+            last.shown = format!("{} {text}", last.shown);
+            last.text = format!("{} {text}", last.text);
+        } else if old.windows(new.len()).any(|w| w == new.as_slice()) {
+            // Still on screen.
+            last.end = last.end.max(end);
+        } else if shared >= 3 && old[..shared] == new[..shared] {
+            // The same line, grown or corrected.
+            last.text = text.clone();
+            last.shown = text;
+            last.end = last.end.max(end);
+        } else {
+            // A new line that starts by repeating (or rewriting) the end of
+            // the previous one: the new version of those words wins.
+            if let Some(from) = rewritten_tail(&old, &new) {
+                last.text = last
+                    .text
+                    .split_whitespace()
+                    .take(from)
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                if last.text.is_empty() {
+                    lines.pop();
+                }
             }
-            Some(last) if added => {
-                last.text.push(' ');
-                last.text.push_str(&text);
-            }
-            _ => {
-                lines.push(Line { start, end, text });
-                added = true;
-            }
+            lines.push(Line {
+                start,
+                end,
+                text: text.clone(),
+                shown: text,
+            });
+            added = true;
         }
     }
     lines
+}
+
+/// Where, near the end of `old`, the words that `new` starts with begin. They
+/// must run to the end of `old` (its last word may be cut short, "gord" for
+/// "gordito") or match for at least three words before Kick rewrote the rest.
+fn rewritten_tail(old: &[String], new: &[String]) -> Option<usize> {
+    let first = old.len().saturating_sub(25);
+    (first..old.len()).find(|&from| {
+        let mut run = 0;
+        while from + run < old.len() && run < new.len() {
+            let (a, b) = (&old[from + run], &new[run]);
+            let last_word = from + run == old.len() - 1;
+            if a == b || (last_word && !a.is_empty() && b.starts_with(a.as_str())) {
+                run += 1;
+            } else {
+                break;
+            }
+        }
+        let to_end = from + run == old.len();
+        (to_end && run >= 2) || run >= 3
+    })
 }
 
 /// "00:01:02.500" or "01:02.500" in seconds.
@@ -277,16 +352,57 @@ esto es Oval.\n\
     }
 
     #[test]
+    fn kick_captions_are_merged_without_repeats() {
+        let cues = [
+            "Señoras y señores, me voy a la oficina técnico T",
+            "Señoras y señores, me voy a la oficina técnico táctica. Mod y el audio pongan los",
+            "Señoras y señores, me voy a la oficina técnico táctica. Mod y el audio, pónganlos o los cabo.",
+            "Ay, gord",
+            "Ay, gordito. Qué lindo. Pero qué lindo es volver a ver",
+            "Ay, gordito. Qué lindo, pero qué lindo es volver a ver al semental italiano. Qué lindo ver al mejor",
+            "al semental italiano. Qué lindo ver al mejor equipo al",
+            "al semental italiano. Qué lindo ver al mejor equipo al mundo.",
+        ];
+        let vtt: String = cues
+            .iter()
+            .enumerate()
+            .map(|(i, c)| {
+                format!(
+                    "00:00:{:02}.000 --> 00:00:{:02}.000\n{c}\n\n",
+                    i * 2,
+                    i * 2 + 2
+                )
+            })
+            .collect();
+        let text: Vec<String> = parse_vtt(&format!("WEBVTT\n\n{vtt}"))
+            .into_iter()
+            .map(|l| l.text)
+            .collect();
+        assert_eq!(
+            text,
+            [
+                "Señoras y señores, me voy a la oficina técnico táctica. Mod y el audio, pónganlos o los cabo.",
+                "Ay, gordito. Qué lindo, pero qué lindo es volver a ver",
+                "al semental italiano. Qué lindo ver al mejor equipo al mundo.",
+            ]
+        );
+    }
+
+    #[test]
+    fn growing_lines_keep_the_longest() {
+        let vtt = "WEBVTT\n\n00:38:50.205 --> 00:38:52.163\nSeñoras y señores\n\n00:38:52.163 --> 00:38:54.148\nSeñoras y señores, me voy\n\n00:38:54.148 --> 00:38:56.134\nSeñoras y señores, me voy a la oficina.\n\n00:38:56.134 --> 00:38:58.000\nOtra frase\n";
+        let lines = parse_vtt(vtt);
+        let text: Vec<&str> = lines.iter().map(|l| l.text.as_str()).collect();
+        assert_eq!(
+            text,
+            ["Señoras y señores, me voy a la oficina.", "Otra frase"]
+        );
+        assert_eq!((lines[0].start, lines[0].end), (2330.205, 2336.134));
+    }
+
+    #[test]
     fn two_row_cues_stay_together() {
-        let vtt = "WEBVTT
-
-00:00:01.200 --> 00:00:03.360
-All right, so here we are
-in front of the elephants
-
-00:00:05.000 --> 00:00:06.000
-the cool thing
-";
+        let vtt = "WEBVTT\n\n00:00:01.200 --> 00:00:03.360\nAll right, so here we are\nin front of the elephants\n\n00:00:05.000 --> 00:00:06.000\nthe cool thing\n";
         let text: Vec<String> = parse_vtt(vtt).into_iter().map(|l| l.text).collect();
         assert_eq!(
             text,

@@ -65,5 +65,35 @@ class KickChannelTests(unittest.TestCase):
             list(self.ie._entries('channel', 'clips'))
 
 
+class KickVodTests(unittest.TestCase):
+    SOURCE = ('https://stream.kick.com/3c81249a5ce0/ivs/v1/196233775518/1jxRW8srP4xt/'
+              '2026/10/14/18/17/FevkIoASjqXY/media/hls/master.m3u8')
+
+    def test_both_kinds_of_id_match(self):
+        ie = module.OvalKickVodIE()
+        for vod in ('01a13ba2-61a0-73a5-bb58-9ca6d0cb58b4', 'a97d92fb-a32e-4fde-aea1-a79f5b4279ee'):
+            self.assertTrue(ie.suitable(f'https://kick.com/lacobraaa/videos/{vod}'))
+        self.assertFalse(ie.suitable('https://kick.com/lacobraaa/videos'))
+
+    def test_page_video_object(self):
+        page = ('<script type="application/ld+json">{"@graph":[{"@type":"WebPage"},'
+                '{"@type":"VideoObject","name":"Vod","contentUrl":"%s","duration":"PT10H32M35S"}]}</script>' % self.SOURCE)
+        video = module.video_object(page)
+        self.assertEqual(video['name'], 'Vod')
+        self.assertEqual(video['contentUrl'], self.SOURCE)
+        self.assertIsNone(module.video_object('<html></html>'))
+
+    def test_subtitles_and_thumbnails_come_from_the_stream(self):
+        master = ('#EXTM3U\n#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subtitles",NAME="Spanish",'
+                  'URI="subtitles/es/playlist.m3u8",LANGUAGE="es"\n#EXT-X-MEDIA:TYPE=VIDEO,GROUP-ID="1080p60"\n')
+        subs = module.hls_subtitles(master, self.SOURCE)
+        self.assertEqual(list(subs), ['es'])
+        self.assertTrue(subs['es'][0]['url'].endswith('/media/hls/subtitles/es/playlist.m3u8'))
+        thumbs = module.stream_thumbnails(self.SOURCE)
+        self.assertEqual(thumbs[-1]['url'],
+                         'https://images.kick.com/video_thumbnails/1jxRW8srP4xt/FevkIoASjqXY/1080.webp')
+        self.assertEqual(module.stream_thumbnails('https://example.com/x.m3u8'), [])
+
+
 if __name__ == '__main__':
     unittest.main()

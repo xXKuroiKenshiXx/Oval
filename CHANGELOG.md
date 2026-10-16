@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-10-16
+
+### Fixed
+- Kick: los vídeos con los enlaces nuevos de Kick (`kick.com/canal/videos/01a1…`) ya se
+  descargan, también por tramos desde la extensión, en lugar de fallar con «HTTP Error 404».
+- Kick: la transcripción usa los subtítulos automáticos de Kick (español, inglés o portugués)
+  y la miniatura se baja aunque Kick bloquee su enlace principal.
+- Transcripciones sin frases repetidas cuando los subtítulos se escriben palabra a palabra.
+
 ## [0.5.0] - 2026-10-16
 
 ### Added
