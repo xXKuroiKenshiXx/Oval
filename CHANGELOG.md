@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-16
+
 ### Added
 - iPhone y iPad (iOS 13 o superior): `.ipa` sin firmar para instalar con xtool, AltStore o
   Sideloadly. yt-dlp corre dentro de la app sobre un Python embebido, con JavaScriptCore para
