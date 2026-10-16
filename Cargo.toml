@@ -43,6 +43,11 @@ libc = "0.2"
 tar = "0.4"
 lzma-rs = "0.3"
 
+# tauri-plugin-deep-link 2.6 fills ParseOption field by field; newer rust-ini
+# added fields and it no longer compiles on Linux. Drop once the plugin is fixed.
+[target.'cfg(target_os = "linux")'.dependencies]
+rust-ini = "=0.21.1"
+
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = [
     "Win32_Foundation",
