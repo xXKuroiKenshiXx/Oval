@@ -10,6 +10,7 @@ Downloads are pinned and checked by hash. The app updates yt-dlp by itself.
 """
 
 import hashlib
+import re
 import subprocess
 import sys
 import tarfile
@@ -60,6 +61,15 @@ def project() -> None:
     spec = yaml.safe_load(spec_path.read_text(encoding="utf-8"))
     name = next(t for t in spec["targets"] if t.endswith("_iOS"))
     target = spec["targets"][name]
+
+    # `tauri ios init` writes the Rust build phase for whichever CLI ran it
+    # (`node tauri ...` for a global npm install). Use the same CLI as the
+    # Android build, so any machine with Node can build.
+    for script in target.get("preBuildScripts", []):
+        if "xcode-script" in script.get("script", ""):
+            script["script"] = re.sub(
+                r"^.*?(?= ios xcode-script)", "npx --yes @tauri-apps/cli@2",
+                script["script"], flags=re.M)
 
     deps = target.setdefault("dependencies", [])
     if not any(d.get("framework") == "Python.xcframework" for d in deps):
