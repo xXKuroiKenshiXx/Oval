@@ -1,0 +1,85 @@
+name: iOS
+
+# Builds the unsigned iOS app (Oval_x.y.z_ios.ipa), after checking on the
+# simulator that it really downloads. The IPA is signed when it is installed:
+# with xtool from Linux or Windows (see packaging/ios/README.md), AltStore,
+# SideStore or Sideloadly.
+
+on:
+  workflow_dispatch:
+  workflow_call:
+  push:
+    paths:
+      - "plugins/oval-engine/**"
+      - "engine_plugins/ios/**"
+      - "packaging/ios/**"
+      - ".github/workflows/ios.yml"
+
+jobs:
+  ios:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios,aarch64-apple-ios-sim
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Tools
+        run: |
+          brew install xcodegen
+          python -m pip install pyyaml
+          npm install -g @tauri-apps/cli@2
+      - name: Xcode project
+        run: |
+          if [ ! -f gen/apple/project.yml ]; then tauri ios init --ci; fi
+          tauri icon icons/icon.png -o "$RUNNER_TEMP/icons"
+          cp "$RUNNER_TEMP"/icons/ios/*.png gen/apple/Assets.xcassets/AppIcon.appiconset/
+          python packaging/ios/prepare.py
+      - name: Simulator build
+        run: tauri ios build --ci --debug --target aarch64-sim
+      - name: Simulator downloads
+        run: |
+          app=$(find gen/apple/build -maxdepth 3 -name "Oval.app" -type d | head -1)
+          type=$(xcrun simctl list devicetypes | grep -o 'com.apple.CoreSimulator.SimDeviceType.iPhone-[0-9]*' | sort -V | tail -1)
+          udid=$(xcrun simctl create oval "$type")
+          xcrun simctl boot "$udid"
+          xcrun simctl install "$udid" "$app"
+          check() {
+            log="$RUNNER_TEMP/run.log"
+            : > "$log"
+            SIMCTL_CHILD_OVAL_SELFTEST="$1" xcrun simctl launch --console-pty --terminate-running-process "$udid" io.github.xxkuroikenshixx.oval > "$log" 2>&1 &
+            for _ in $(seq 900); do grep -q OVAL_SELFTEST "$log" && break; sleep 1; done
+            xcrun simctl terminate "$udid" io.github.xxkuroikenshixx.oval || true
+            cat "$log" >> "$RUNNER_TEMP/sim.log"
+            grep -m1 OVAL_SELFTEST "$log" > "$RUNNER_TEMP/result" || echo "OVAL_SELFTEST no answer" > "$RUNNER_TEMP/result"
+            cat "$RUNNER_TEMP/result"
+            grep -q "OVAL_SELFTEST ok" "$RUNNER_TEMP/result"
+          }
+          # A plain file: Python, TLS and yt-dlp work inside the app.
+          check "https://archive.org/download/Popeye_forPresident/Popeye_forPresident_512kb.mp4"
+          # YouTube: JavaScriptCore challenges and the AVFoundation merge. CI
+          # machines are often blocked by YouTube, so this only warns.
+          check "https://www.youtube.com/watch?v=jNQXAC9IVRw" || echo "::warning::YouTube on the simulator: $(cat "$RUNNER_TEMP/result")"
+      - name: Device build
+        run: tauri ios build --ci --no-sign --target aarch64
+      - name: Collect
+        run: |
+          version=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
+          mkdir dist
+          cp "$(find gen/apple/build -name '*.ipa' | head -1)" "dist/Oval_${version}_ios.ipa"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ios
+          path: dist/*
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: ios-logs
+          path: ${{ runner.temp }}/sim.log
+          if-no-files-found: ignore

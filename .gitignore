@@ -7,3 +7,7 @@ Thumbs.db
 /_site
 __pycache__/
 *.pyc
+/extension/dist
+/gen/apple/Python.xcframework
+/gen/apple/app_packages
+/plugins/oval-engine/.tauri

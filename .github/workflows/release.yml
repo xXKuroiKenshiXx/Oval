@@ -194,8 +194,11 @@ jobs:
           name: android
           path: dist/*
 
+  ios:
+    uses: ./.github/workflows/ios.yml
+
   publish:
-    needs: [windows, linux, flatpak, distros, android]
+    needs: [windows, linux, flatpak, distros, android, ios]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -203,6 +206,11 @@ jobs:
         with:
           path: dist
           merge-multiple: true
+      - name: Browser extension
+        run: |
+          python3 extension/build.py
+          cp extension/dist/oval-extension-chromium.zip "dist/Oval_${GITHUB_REF_NAME#v}_extension-chromium.zip"
+          cp extension/dist/oval-extension-firefox.zip "dist/Oval_${GITHUB_REF_NAME#v}_extension-firefox.zip"
       - name: Create release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -213,7 +221,8 @@ jobs:
             "Oval_${version}_amd64.AppImage" "Oval_${version}_amd64.deb" \
             "Oval-${version}-1.x86_64.rpm" "Oval_${version}_x86_64.flatpak" \
             "oval-bin-${version}-1-x86_64.pkg.tar.zst" "oval-${version}_1.x86_64.xbps" \
-            "Oval_${version}_android.apk"; do
+            "Oval_${version}_android.apk" "Oval_${version}_ios.ipa" \
+            "Oval_${version}_extension-chromium.zip" "Oval_${version}_extension-firefox.zip"; do
             test -s "dist/$file" || { echo "Missing release asset: $file"; exit 1; }
           done
           notes=$(awk -v v="$version" 'index($0, "## [" v "]") == 1 {f=1; next} /^## / {f=0} f' CHANGELOG.md)

@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+### Added
+- iPhone y iPad (iOS 13 o superior): `.ipa` sin firmar para instalar con xtool, AltStore o
+  Sideloadly. yt-dlp corre dentro de la app sobre un Python embebido, con JavaScriptCore para
+  YouTube y AVFoundation para unir vídeo y audio. Vídeo en MP4 hasta 1080p y audio en M4A; los
+  directos aún no se pueden grabar.
+- Extensión para Chrome, Edge, Brave, Opera, Firefox y Safari: panel flotante con clip
+  (entrada, salida y corte preciso), vídeo completo, transcripción en Markdown, texto, SRT o
+  VTT (con nota TL;DR), miniatura y carpeta de destino. También «Descargar con Oval» en el
+  menú del clic derecho.
+- Servidor local para la extensión, que solo acepta peticiones de extensiones del navegador.
+
 ## [0.4.1] - 2026-10-12
 
 **Actualización de emergencia de 0.4.1**: reemplaza los paquetes anteriores de esta misma

@@ -1022,6 +1022,10 @@ html.mobile #folder-change { display: none; }
 html.mobile .split .chip { padding-right: 14px; }
 html.mobile .bar { top: 30px; }
 html.mobile .tabs { top: 70px; width: min(300px, calc(100% - 56px)); }
+/* iOS can't record live streams (no FFmpeg): two tabs. */
+html.ios .tabs { grid-template-columns: 1fr 1fr; }
+html.ios .tabs [data-tab="live"] { display: none; }
+html.ios .tabs-glider { width: calc((100% - 6px) / 2); }
 html.mobile .view { padding-top: 124px; }
 html.mobile .pill { width: calc(100% - 32px); height: 52px; }
 html.mobile .go { width: 40px; height: 40px; }

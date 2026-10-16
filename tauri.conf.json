@@ -46,6 +46,10 @@
       "icons/icon.png",
       "icons/icon.ico"
     ],
+    "iOS": {
+      "minimumSystemVersion": "13.0",
+      "frameworks": ["AVFoundation", "JavaScriptCore"]
+    },
     "windows": {
       "webviewInstallMode": {
         "type": "downloadBootstrapper"

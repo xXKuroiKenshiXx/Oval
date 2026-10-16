@@ -30,6 +30,8 @@ const ICON = {
 const DESIGN = 672; // diameter the stage is laid out on
 const DEFAULT_SIZE = 700;
 let MOBILE = false; // phones get an upright, full-screen oval instead
+let PHONE_FOLDER = "Descargas/Oval"; // where a phone keeps the downloads
+let IOS = false;
 
 /* ---------- Formatting ---------- */
 
@@ -153,7 +155,7 @@ const INPUTS = { link: "#url", channel: "#channel-url", live: "#live-url" };
 let tab = "link";
 
 function setTab(next) {
-  tab = INPUTS[next] ? next : "link";
+  tab = INPUTS[next] && !(IOS && next === "live") ? next : "link";
   $(".tabs").dataset.on = tab;
   $("#stage").dataset.tab = tab;
   $$(".tabs button").forEach((b) => b.classList.toggle("on", b.dataset.tab === tab));
@@ -327,7 +329,7 @@ function metaFor(j) {
       return parts.filter(Boolean).join(" · ");
     }
     case "processing":
-      return j.mode === "audio" ? "Convirtiendo a MP3…" : "Uniendo vídeo y audio…";
+      return j.mode === "audio" ? (IOS ? "Guardando audio…" : "Convirtiendo a MP3…") : "Uniendo vídeo y audio…";
     case "paused":
       return ["En pausa", pct, size].filter(Boolean).join(" · ");
     case "done":
@@ -391,7 +393,7 @@ function renderJob(j) {
     el.addEventListener("click", () => {
       const cur = jobs.get(j.id);
       if (!cur || cur.data.status !== "done") return;
-      if (MOBILE) toast("Guardado en Descargas/Oval");
+      if (MOBILE) toast(`Guardado en ${PHONE_FOLDER}`);
       else invoke("reveal", { id: j.id });
     });
     $(j.live ? "#live-queue" : "#queue").appendChild(el);
@@ -815,7 +817,7 @@ function wire() {
   });
 
   $("#folder").addEventListener("click", () => {
-    if (MOBILE) toast("Las descargas están en Descargas/Oval");
+    if (MOBILE) toast(`Las descargas están en ${PHONE_FOLDER}`);
     else invoke("reveal", { id: null });
   });
   $("#folder-change").addEventListener("click", changeFolder);
@@ -921,8 +923,15 @@ function wire() {
 
 async function main() {
   const os = await invoke("platform").catch(() => "");
-  MOBILE = os === "android";
+  MOBILE = os === "android" || os === "ios";
+  IOS = os === "ios";
   document.documentElement.classList.toggle("mobile", MOBILE);
+  document.documentElement.classList.toggle("ios", IOS);
+  if (IOS) {
+    // No FFmpeg on iOS: audio stays AAC (M4A) and live recording is off.
+    PHONE_FOLDER = "Archivos › En mi iPhone › Oval";
+    for (const b of $$('[data-mode="audio"]')) b.textContent = "M4A";
+  }
   document.documentElement.classList.toggle("web", os === "web"); // demo on the website
   fitStage();
   setMode(mode);

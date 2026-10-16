@@ -1,6 +1,6 @@
 //! Runs yt-dlp. On desktop it is a child process (see `tools` for where the
-//! binaries come from); on Android it goes through the embedded engine of the
-//! `oval-engine` plugin. Callers see the same thing either way: a stream of
+//! binaries come from); on Android and iOS it goes through the embedded engine
+//! of the `oval-engine` plugin. Callers see the same thing either way: a stream of
 //! output lines followed by an exit status.
 
 use serde::Serialize;
@@ -201,6 +201,35 @@ fn engine(app: &AppHandle) -> tauri::State<'_, tauri_plugin_oval_engine::Engine<
     app.state::<tauri_plugin_oval_engine::Engine<tauri::Wry>>()
 }
 
+/// The iOS engine runs `engine_plugins/ios/oval_ios.py` on its embedded
+/// Python and keeps yt-dlp updates in the app's data folder.
+#[cfg(target_os = "ios")]
+fn setup(app: &AppHandle) -> Result<tauri_plugin_oval_engine::Setup, String> {
+    let driver = app
+        .path()
+        .app_cache_dir()
+        .map_err(|e| e.to_string())?
+        .join("engine-ios")
+        .join(env!("CARGO_PKG_VERSION"));
+    std::fs::create_dir_all(&driver).map_err(|e| e.to_string())?;
+    std::fs::write(
+        driver.join("oval_ios.py"),
+        include_str!("../engine_plugins/ios/oval_ios.py"),
+    )
+    .map_err(|e| e.to_string())?;
+    let home = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(&home).map_err(|e| e.to_string())?;
+    Ok(tauri_plugin_oval_engine::Setup {
+        driver: Some(driver.display().to_string()),
+        home: Some(home.display().to_string()),
+    })
+}
+
+#[cfg(target_os = "android")]
+fn setup(_app: &AppHandle) -> Result<tauri_plugin_oval_engine::Setup, String> {
+    Ok(tauri_plugin_oval_engine::Setup::default())
+}
+
 #[cfg(mobile)]
 pub async fn prepare(app: &AppHandle) -> Result<(), String> {
     let mut done = PREPARED.lock().await;
@@ -209,7 +238,8 @@ pub async fn prepare(app: &AppHandle) -> Result<(), String> {
     }
     emit(app, false, "Preparando motor", None);
     let handle = app.clone();
-    let result = tokio::task::spawn_blocking(move || engine(&handle).prepare())
+    let setup = setup(app)?;
+    let result = tokio::task::spawn_blocking(move || engine(&handle).prepare(setup))
         .await
         .map_err(|e| e.to_string())?;
     match result {

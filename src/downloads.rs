@@ -67,6 +67,10 @@ pub struct Job {
     pub live: bool,
     /// Seconds recorded so far (live only).
     pub elapsed: f64,
+    /// Only this part of the video (a clip sent from the browser extension).
+    pub section: Option<Section>,
+    /// Cut the clip on the exact frame (re-encodes around the cuts).
+    pub precise: bool,
     #[serde(skip)]
     dir: PathBuf,
     /// Set by "stop" on a live recording: finish and keep the file.
@@ -92,11 +96,55 @@ pub struct Job {
     retried: bool,
 }
 
-#[derive(Deserialize)]
+#[derive(Default, Deserialize)]
 pub struct NewJob {
     pub url: String,
     pub title: Option<String>,
     pub thumbnail: Option<String>,
+    #[serde(default)]
+    pub section: Option<Section>,
+    #[serde(default)]
+    pub precise: bool,
+    /// Absolute folder chosen outside the app (browser extension).
+    #[serde(skip)]
+    pub dir: Option<PathBuf>,
+}
+
+/// Start and end of a clip, in seconds.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Section {
+    pub start: f64,
+    pub end: f64,
+}
+
+impl Section {
+    pub fn is_valid(&self) -> bool {
+        self.start.is_finite() && self.end.is_finite() && self.start >= 0.0 && self.end > self.start
+    }
+
+    /// "15m04s-15m22s": readable in a file name and valid on every system.
+    pub fn label(&self) -> String {
+        fn t(sec: f64) -> String {
+            let ms = (sec * 1000.0).round() as u64;
+            let (h, m, s, frac) = (
+                ms / 3_600_000,
+                ms / 60_000 % 60,
+                ms / 1000 % 60,
+                ms % 1000 / 100,
+            );
+            let tail = if frac > 0 {
+                format!("{s:02}.{frac}s")
+            } else {
+                format!("{s:02}s")
+            };
+            if h > 0 {
+                format!("{h}h{m:02}m{tail}")
+            } else {
+                format!("{m}m{tail}")
+            }
+        }
+        format!("{}-{}", t(self.start), t(self.end))
+    }
 }
 
 #[derive(Default)]
@@ -111,7 +159,13 @@ pub fn download_root(app: &AppHandle) -> PathBuf {
     }
     #[cfg(target_os = "android")]
     return PathBuf::from("/storage/emulated/0/Download/Oval");
-    #[cfg(not(target_os = "android"))]
+    // The app's Documents folder: "On My iPhone > Oval" in the Files app.
+    #[cfg(target_os = "ios")]
+    return app
+        .path()
+        .document_dir()
+        .unwrap_or_else(|_| std::env::temp_dir());
+    #[cfg(not(mobile))]
     dirs::download_dir()
         .or_else(dirs::home_dir)
         .unwrap_or_else(std::env::temp_dir)
@@ -163,6 +217,7 @@ impl Queue {
                 *next += 1;
                 let url = normalize_kick_url(item.url.trim());
                 let live = kick_live(&url).unwrap_or(live);
+                let section = item.section.filter(|s| s.is_valid() && !live);
                 let job = Job {
                     id: *next,
                     title: item
@@ -183,7 +238,9 @@ impl Queue {
                     path: None,
                     live,
                     elapsed: 0.0,
-                    dir: dir.clone(),
+                    section,
+                    precise: item.precise && section.is_some(),
+                    dir: item.dir.unwrap_or_else(|| dir.clone()),
                     stopping: false,
                     raw: None,
                     stem: None,
@@ -440,7 +497,7 @@ fn retry_if_blocked(app: &AppHandle, id: u64) {
 }
 
 async fn run_job(app: &AppHandle, id: u64, run: u64) -> Result<(), String> {
-    let (url, mode, quality, dir, live) = {
+    let (url, mode, quality, dir, live, section, precise) = {
         let q = queue(app);
         let jobs = q.jobs.lock().unwrap();
         match jobs.iter().find(|j| j.id == id && j.run == run) {
@@ -450,10 +507,17 @@ async fn run_job(app: &AppHandle, id: u64, run: u64) -> Result<(), String> {
                 j.quality.clone(),
                 j.dir.clone(),
                 j.live,
+                j.section,
+                j.precise,
             ),
             None => return Ok(()),
         }
     };
+    // Recording needs FFmpeg, which iOS apps can't run.
+    #[cfg(target_os = "ios")]
+    if live {
+        return Err("En iPhone y iPad todavía no se pueden grabar directos".into());
+    }
     tokio::fs::create_dir_all(&dir)
         .await
         .map_err(|e| e.to_string())?;
@@ -511,50 +575,14 @@ async fn run_job(app: &AppHandle, id: u64, run: u64) -> Result<(), String> {
         None => "res,vcodec:h264,acodec:aac".into(),
     };
     let extra: Vec<String> = match mode {
-        // Recorded as MPEG-TS straight into the final name: a TS file stays
-        // playable when the process is cut, and "stop" turns it into an MP4.
-        _ if live => vec![
-            "-o".into(),
-            "%(uploader,channel,id).80B %(epoch>%Y-%m-%d %H-%M-%S)s.%(ext)s".into(),
-            "-f".into(),
-            "b/bv*+ba".into(),
-            "-S".into(),
-            sort,
-            "--hls-use-mpegts".into(),
-            "--no-part".into(),
-        ],
-        Mode::Video => vec![
-            "-o".into(),
-            "%(title).150B [%(id)s].%(ext)s".into(),
-            "-f".into(),
-            "bv*+ba/b".into(),
-            "-S".into(),
-            sort,
-            "--merge-output-format".into(),
-            "mp4".into(),
-            // Single-file downloads (archive.org, some sites) come as AVI,
-            // FLV or MOV; repackage them so everything ends up as MP4.
-            "--remux-video".into(),
-            "avi>mp4/flv>mp4/mov>mp4/webm>mp4".into(),
-        ],
-        Mode::Audio => {
-            let bitrate = quality
-                .as_ref()
-                .map_or_else(|| "0".into(), |k| format!("{k}K"));
-            vec![
-                "-o".into(),
-                "%(title).150B [%(id)s].%(ext)s".into(),
-                "-f".into(),
-                "ba/b".into(),
-                "-x".into(),
-                "--audio-format".into(),
-                "mp3".into(),
-                "--audio-quality".into(),
-                bitrate,
-            ]
-        }
+        _ if live => live_args(sort),
+        Mode::Video => video_args(sort),
+        Mode::Audio => audio_args(quality.as_deref()),
     };
     args.extend(extra);
+    if let Some(section) = section {
+        clip_args(&mut args, section, precise);
+    }
     args.extend(youtube_args(&url));
     // Android's bundled FFmpeg 7.1 refuses YouTube's live audio segments
     // ("extension mismatches allowed extensions") unless told not to be picky.
@@ -563,6 +591,21 @@ async fn run_job(app: &AppHandle, id: u64, run: u64) -> Result<(), String> {
         args.push("--downloader-args".into());
         args.push("ffmpeg_i:-extension_picky 0".into());
     }
+    // iOS: no FFmpeg (merging goes through AVFoundation) and JavaScriptCore
+    // instead of an external JavaScript runtime. See engine_plugins/ios.
+    #[cfg(target_os = "ios")]
+    args.extend(
+        [
+            "--downloader",
+            "native",
+            "--fixup",
+            "never",
+            "--no-js-runtimes",
+            "--remote-components",
+            "ejs:github",
+        ]
+        .map(String::from),
+    );
     args.push("--".into());
     args.push(url);
 
@@ -640,6 +683,108 @@ async fn run_job(app: &AppHandle, id: u64, run: u64) -> Result<(), String> {
         }
     });
     Ok(())
+}
+
+/// Downloads only `section` and names the file after it, so several clips of
+/// one video sit next to each other: "Title [id] 15m04s-15m22s.mp4".
+fn clip_args(args: &mut Vec<String>, section: Section, precise: bool) {
+    if let Some(i) = args.iter().position(|a| a == "-o") {
+        if let Some(template) = args.get_mut(i + 1) {
+            *template = template.replacen(".%(ext)s", &format!(" {}.%(ext)s", section.label()), 1);
+        }
+    }
+    args.push("--download-sections".into());
+    args.push(format!("*{:.3}-{:.3}", section.start, section.end));
+    if precise {
+        args.push("--force-keyframes-at-cuts".into());
+    }
+}
+
+/// Recorded as MPEG-TS straight into the final name: a TS file stays playable
+/// when the process is cut, and "stop" turns it into an MP4.
+fn live_args(sort: String) -> Vec<String> {
+    [
+        "-o",
+        "%(uploader,channel,id).80B %(epoch>%Y-%m-%d %H-%M-%S)s.%(ext)s",
+        "-f",
+        "b/bv*+ba",
+        "-S",
+        &sort,
+        "--hls-use-mpegts",
+        "--no-part",
+    ]
+    .map(String::from)
+    .to_vec()
+}
+
+#[cfg(not(target_os = "ios"))]
+fn video_args(sort: String) -> Vec<String> {
+    [
+        "-o",
+        "%(title).150B [%(id)s].%(ext)s",
+        "-f",
+        "bv*+ba/b",
+        "-S",
+        &sort,
+        "--merge-output-format",
+        "mp4",
+        // Single-file downloads (archive.org, some sites) come as AVI,
+        // FLV or MOV; repackage them so everything ends up as MP4.
+        "--remux-video",
+        "avi>mp4/flv>mp4/mov>mp4/webm>mp4",
+    ]
+    .map(String::from)
+    .to_vec()
+}
+
+/// AVFoundation joins H.264 + AAC into MP4 without re-encoding, so iOS asks
+/// for those (YouTube has them up to 1080p) and keeps other single files as
+/// they come.
+#[cfg(target_os = "ios")]
+fn video_args(sort: String) -> Vec<String> {
+    [
+        "-o",
+        "%(title).150B [%(id)s].%(ext)s",
+        "-f",
+        "bv*[vcodec^=avc1]+ba[ext=m4a]/b[ext=mp4]/bv*[ext=mp4]+ba[ext=m4a]/b",
+        "-S",
+        &sort,
+        "--merge-output-format",
+        "mp4",
+    ]
+    .map(String::from)
+    .to_vec()
+}
+
+#[cfg(not(target_os = "ios"))]
+fn audio_args(bitrate: Option<&str>) -> Vec<String> {
+    let bitrate = bitrate.map_or_else(|| "0".into(), |k| format!("{k}K"));
+    [
+        "-o",
+        "%(title).150B [%(id)s].%(ext)s",
+        "-f",
+        "ba/b",
+        "-x",
+        "--audio-format",
+        "mp3",
+        "--audio-quality",
+        &bitrate,
+    ]
+    .map(String::from)
+    .to_vec()
+}
+
+/// No MP3 encoder on iOS: the AAC (M4A) audio is saved as it comes.
+#[cfg(target_os = "ios")]
+fn audio_args(_bitrate: Option<&str>) -> Vec<String> {
+    [
+        "-o",
+        "%(title).150B [%(id)s].%(ext)s",
+        "-f",
+        "ba[ext=m4a]/ba/b",
+    ]
+    .map(String::from)
+    .to_vec()
 }
 
 /// Polls the size of a live recording once a second: yt-dlp hands live
@@ -1226,6 +1371,35 @@ mod tests {
             normalize_kick_url("https://kick.com/video/01a11bec-c058-7ab7-9ad2-1071ac6a5bbb"),
             "https://kick.com/_/videos/01a11bec-c058-7ab7-9ad2-1071ac6a5bbb"
         );
+    }
+
+    #[test]
+    fn clips_are_named_after_their_range() {
+        let s = Section {
+            start: 904.8,
+            end: 922.2,
+        };
+        assert_eq!(s.label(), "15m04.8s-15m22.2s");
+        assert_eq!(
+            Section {
+                start: 3600.0,
+                end: 3661.0
+            }
+            .label(),
+            "1h00m00s-1h01m01s"
+        );
+        assert!(!Section {
+            start: 5.0,
+            end: 5.0
+        }
+        .is_valid());
+        let mut args: Vec<String> = ["-o", "%(title).150B [%(id)s].%(ext)s"]
+            .map(String::from)
+            .to_vec();
+        clip_args(&mut args, s, true);
+        assert_eq!(args[1], "%(title).150B [%(id)s] 15m04.8s-15m22.2s.%(ext)s");
+        assert_eq!(args[3], "*904.800-922.200");
+        assert_eq!(args[4], "--force-keyframes-at-cuts");
     }
 
     #[test]

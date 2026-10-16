@@ -1,13 +1,19 @@
-//! Oval: the same code runs the desktop app (`main.rs`) and the Android app.
+//! Oval: the same code runs the desktop app (`main.rs`) and the Android and
+//! iOS apps.
 
+#[cfg(desktop)]
+mod bridge;
 mod channel;
 mod downloads;
 mod engine;
+#[cfg(desktop)]
+mod extras;
 #[cfg(desktop)]
 mod platform;
 mod settings;
 #[cfg(desktop)]
 mod tools;
+mod transcript;
 
 use downloads::{Job, Mode, NewJob, Queue};
 use tauri::{AppHandle, Manager, State};
@@ -33,8 +39,7 @@ fn add_download(
 ) -> Vec<Job> {
     let item = NewJob {
         url,
-        title: None,
-        thumbnail: None,
+        ..NewJob::default()
     };
     queue.add(&app, vec![item], mode, quality.as_deref(), None, false)
 }
@@ -43,8 +48,7 @@ fn add_download(
 fn add_live(app: AppHandle, queue: State<Queue>, url: String, quality: Option<String>) -> Vec<Job> {
     let item = NewJob {
         url,
-        title: None,
-        thumbnail: None,
+        ..NewJob::default()
     };
     queue.add(
         &app,
@@ -174,22 +178,34 @@ fn download_folder(app: AppHandle) -> String {
 #[cfg(desktop)]
 #[tauri::command]
 async fn choose_folder(app: AppHandle) -> Option<String> {
+    let start = Some(downloads::download_root(&app));
+    let path = pick_folder(&app, "Carpeta de descargas", start).await?;
+    settings::update(&app, |s| s.folder = Some(path.clone()));
+    Some(path.display().to_string())
+}
+
+/// A native folder picker on top of Oval's window.
+#[cfg(desktop)]
+pub(crate) async fn pick_folder(
+    app: &AppHandle,
+    title: &str,
+    start: Option<std::path::PathBuf>,
+) -> Option<std::path::PathBuf> {
     use tauri_plugin_dialog::DialogExt;
     let (tx, rx) = tokio::sync::oneshot::channel();
-    let mut dialog = app
-        .dialog()
-        .file()
-        .set_title("Carpeta de descargas")
-        .set_directory(downloads::download_root(&app));
+    let mut dialog = app.dialog().file().set_title(title);
+    if let Some(start) = start.filter(|p| p.is_dir()) {
+        dialog = dialog.set_directory(start);
+    }
     if let Some(w) = app.get_webview_window("main") {
+        let _ = w.unminimize();
+        let _ = w.set_focus();
         dialog = dialog.set_parent(&w);
     }
     dialog.pick_folder(move |picked| {
         let _ = tx.send(picked);
     });
-    let path = rx.await.ok()??.into_path().ok()?;
-    settings::update(&app, |s| s.folder = Some(path.clone()));
-    Some(path.display().to_string())
+    rx.await.ok()??.into_path().ok()
 }
 
 /// Phones keep downloads in Download/Oval; there is no folder picker.
@@ -197,6 +213,38 @@ async fn choose_folder(app: AppHandle) -> Option<String> {
 #[tauri::command]
 async fn choose_folder() -> Option<String> {
     None
+}
+
+/// Smoke test for phones and simulators in CI: with `OVAL_SELFTEST=<link>`
+/// the app downloads the link, prints the outcome and quits.
+#[cfg(mobile)]
+async fn selftest(app: AppHandle, url: String) {
+    use downloads::Status;
+    let queue = app.state::<Queue>();
+    let item = NewJob {
+        url,
+        ..NewJob::default()
+    };
+    let id = queue.add(&app, vec![item], Mode::Video, Some("360"), None, false)[0].id;
+    for _ in 0..900 {
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        let Some(job) = queue.list().into_iter().find(|j| j.id == id) else {
+            break;
+        };
+        match job.status {
+            Status::Done => {
+                println!("OVAL_SELFTEST ok {}", job.path.unwrap_or_default());
+                std::process::exit(0);
+            }
+            Status::Error => {
+                println!("OVAL_SELFTEST error {}", job.error.unwrap_or_default());
+                std::process::exit(1);
+            }
+            _ => {}
+        }
+    }
+    println!("OVAL_SELFTEST timeout");
+    std::process::exit(1);
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -215,6 +263,8 @@ pub fn run() {
             if let Some(window) = app.get_webview_window("main") {
                 platform::click_through_outside_oval(window);
             }
+            #[cfg(desktop)]
+            bridge::start(app.handle().clone());
             #[cfg(windows)]
             {
                 let handle = app.handle().clone();
@@ -222,6 +272,10 @@ pub fn run() {
             }
             // Warm the engine up front so the first download starts instantly.
             tauri::async_runtime::spawn(engine::warm_up(app.handle().clone()));
+            #[cfg(mobile)]
+            if let Ok(url) = std::env::var("OVAL_SELFTEST") {
+                tauri::async_runtime::spawn(selftest(app.handle().clone(), url));
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

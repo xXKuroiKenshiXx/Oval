@@ -67,7 +67,7 @@ class EnginePlugin(private val activity: Activity) : Plugin(activity) {
     }
 
     @Command
-    fun init(invoke: Invoke) {
+    fun prepare(invoke: Invoke) {
         askForStorage()
         pool.execute {
             try {

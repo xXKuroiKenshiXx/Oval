@@ -30,9 +30,10 @@ futures-util = "0.3"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 trash = "5"
 tauri-plugin-dialog = "2"
+tiny_http = "0.12"
 
-# Android: yt-dlp runs inside the app through this plugin.
-[target.'cfg(target_os = "android")'.dependencies]
+# Phones: yt-dlp runs inside the app through this plugin.
+[target.'cfg(any(target_os = "android", target_os = "ios"))'.dependencies]
 tauri-plugin-oval-engine = { path = "plugins/oval-engine" }
 
 [target.'cfg(all(unix, not(target_os = "android")))'.dependencies]

@@ -29,15 +29,24 @@ struct IdPayload {
     id: u64,
 }
 
+/// Where the iOS engine finds its Python driver and keeps yt-dlp updates.
+/// Android's engine needs neither.
+#[derive(Default, Serialize)]
+pub struct Setup {
+    pub driver: Option<String>,
+    pub home: Option<String>,
+}
+
 impl<R: Runtime> Engine<R> {
-    /// Unpacks Python and yt-dlp on first launch; returns the yt-dlp version.
-    pub fn prepare(&self) -> Result<String, String> {
+    /// Unpacks or starts Python and yt-dlp on first launch; returns the
+    /// yt-dlp version.
+    pub fn prepare(&self, setup: Setup) -> Result<String, String> {
         #[derive(Deserialize)]
         struct Init {
             version: String,
         }
         self.0
-            .run_mobile_plugin::<Init>("init", ())
+            .run_mobile_plugin::<Init>("prepare", setup)
             .map(|i| i.version)
             .map_err(|e| e.to_string())
     }

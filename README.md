@@ -7,7 +7,8 @@
 <p align="center">
   Un descargador de vídeos minimalista, redondo y rápido.<br>
   Pega un enlace, pulsa descargar. Nada más.<br>
-  Vídeos sueltos, canales enteros y directos en tiempo real, en Windows, Linux y Android.
+  Vídeos sueltos, canales enteros y directos en tiempo real, en Windows, Linux, Android,
+  iPhone y iPad, y con una extensión para el navegador.
 </p>
 
 <p align="center">
@@ -54,7 +55,11 @@ Y además:
 - **Ventana ovalada sin bordes** que puedes redimensionar desde el tirador de abajo a la derecha
   (doble clic en el nombre para volver al tamaño original). Fuera del óvalo los clics pasan a lo
   que haya detrás.
-- **Windows, Linux y Android**.
+- **Windows, Linux, Android, iPhone y iPad**.
+- **Extensión para el navegador** (Chrome, Edge, Brave, Opera, Firefox y Safari): un panel
+  flotante para bajar el vídeo que estás viendo, un clip con entrada y salida, la
+  transcripción (Markdown, texto, SRT o VTT) o la miniatura, a la carpeta que elijas.
+  Ver [extension/README.md](extension/README.md).
 - **Resistente a los bloqueos de YouTube**: si YouTube pide "confirmar que no eres un bot", Oval
   cambia solo a otros reproductores de YouTube durante un rato y reintenta, sin pedirte sesión.
 
@@ -73,6 +78,8 @@ Ve a [Releases](https://github.com/xXKuroiKenshiXx/Oval/releases):
 | Arch, Manjaro, EndeavourOS | `oval-bin-x.y.z-1-x86_64.pkg.tar.zst` |
 | Void Linux | `oval-x.y.z_1.x86_64.xbps` |
 | Android 7+ | `Oval_x.y.z_android.apk` (permite instalar apps de fuera de Play Store) |
+| iPhone y iPad (iOS 13+) | `Oval_x.y.z_ios.ipa`, sin firmar: se instala con [xtool](packaging/ios/README.md), AltStore o Sideloadly |
+| Navegador | `Oval_x.y.z_extension-chromium.zip` (Chrome, Edge…) o `Oval_x.y.z_extension-firefox.zip` |
 
 Cómo instalar cada paquete de Linux, desde la carpeta donde lo descargaste:
 
@@ -139,7 +146,13 @@ JavaScript de YouTube.
 
 En Android, yt-dlp, Python y FFmpeg van dentro de la app gracias a
 [youtubedl-android](https://github.com/JunkFood02/youtubedl-android), y QuickJS hace de motor de
-JavaScript.
+JavaScript. En iOS, que no deja arrancar otros programas, yt-dlp corre en un Python embebido
+([BeeWare](https://github.com/beeware/Python-Apple-support)), JavaScriptCore resuelve los
+desafíos de YouTube y AVFoundation une vídeo y audio; detalles en
+[packaging/ios/README.md](packaging/ios/README.md).
+
+La extensión del navegador habla con la app abierta en el mismo equipo a través de un servidor
+local que solo atiende a extensiones (`src/bridge.rs`).
 
 Los vídeos se guardan en H.264 + AAC dentro de MP4 siempre que exista esa versión (hasta 1080p en
 YouTube), así se abren en cualquier reproductor o editor. Por encima de 1080p se usa el códec que
@@ -183,6 +196,9 @@ cargo tauri android build --apk --target aarch64 armv7
 Para firmar, crea `gen/android/keystore.properties` (`storeFile`, `storePassword`, `keyAlias`,
 `keyPassword`); ese archivo no se sube al repositorio.
 
+iOS se compila en un Mac (o en GitHub Actions): ver [packaging/ios/README.md](packaging/ios/README.md).
+La extensión se empaqueta con `python extension/build.py`.
+
 ### Estructura
 
 ```
@@ -193,9 +209,15 @@ src/
   tools.rs       descarga y actualización de yt-dlp y FFmpeg
   settings.rs    ajustes (carpeta, simultáneas)
   platform.rs    clics a través del óvalo, procesos en Windows y Linux
-  engine.rs      ejecuta yt-dlp: proceso en escritorio, motor integrado en Android
-plugins/oval-engine/   puente con youtubedl-android (Kotlin)
+  engine.rs      ejecuta yt-dlp: proceso en escritorio, motor integrado en Android e iOS
+  bridge.rs      servidor local para la extensión del navegador
+  extras.rs      transcripciones y miniaturas que pide la extensión
+  transcript.rs  subtítulos VTT a Markdown, texto, SRT o VTT limpio
+plugins/oval-engine/   motor en el teléfono: youtubedl-android (Kotlin) y Python embebido (Swift)
+engine_plugins/  código Python que usa yt-dlp (extractor de Kick, motor de iOS)
+extension/       extensión del navegador
 gen/android/     proyecto de Android
+packaging/ios/   preparación y guía de instalación de iOS
 ui/              HTML, CSS y JS de la interfaz, sin dependencias
 site/            página web (GitHub Pages) con la demo interactiva
 packaging/       Flatpak, Arch (PKGBUILD), Void y metadatos de Linux
