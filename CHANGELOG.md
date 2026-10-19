@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.5.3] - 2026-10-19
+
 ### Added
 - Perfil «Liviano · hasta 720p» para descargar videos con menor bitrate desde Enlace y Canal.
 - Compresión de videos locales en escritorio: copia MP4 H.264/AAC, hasta 1280 × 720, ahorro visible,
