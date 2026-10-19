@@ -2693,6 +2693,7 @@ dependencies = [
  "tauri-plugin-dialog",
  "tauri-plugin-oval-engine",
  "tauri-plugin-single-instance",
+ "tempfile",
  "tiny_http",
  "tokio",
  "trash",

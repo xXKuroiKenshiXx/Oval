@@ -179,7 +179,7 @@ function setMode(m) {
 
 // value "" = best available
 const QUALITIES = {
-  video: [["", "Máxima", "Máx"], ["2160", "4K", "4K"], ["1440", "1440p", "1440p"], ["1080", "1080p", "1080p"],
+  video: [["", "Máxima", "Máx"], ["light", "Liviano · hasta 720p", "Liviano"], ["2160", "4K", "4K"], ["1440", "1440p", "1440p"], ["1080", "1080p", "1080p"],
           ["720", "720p", "720p"], ["480", "480p", "480p"], ["360", "360p", "360p"]],
   audio: [["", "Máxima", "Máx"], ["320", "320 kbps", "320k"], ["192", "192 kbps", "192k"], ["128", "128 kbps", "128k"]],
   live: [["", "Máxima", "Máx"], ["1080", "1080p", "1080p"], ["720", "720p", "720p"], ["480", "480p", "480p"], ["360", "360p", "360p"]],
@@ -204,10 +204,10 @@ function openQualityMenu(chip) {
   const key = qualityKey(chip.dataset.ctx);
   menu.dataset.key = key;
   menu.innerHTML =
-    `<div class="menu-title">${key === "audio" ? "Calidad de audio" : "Resolución máxima"}</div>` +
+    `<div class="menu-title">${key === "audio" ? "Calidad de audio" : "Calidad de video"}</div>` +
     QUALITIES[key].map(([v, label]) =>
       `<button type="button" role="menuitemradio" data-q="${v}" class="${v === quality[key] ? "on" : ""}">` +
-      `<span>${label}${v === "" ? " <small>la mejor disponible</small>" : ""}</span>` +
+      `<span>${label}${v === "" ? " <small>la mejor disponible</small>" : v === "light" ? " <small>menor bitrate; tamaño según el sitio</small>" : ""}</span>` +
       `<svg class="tick" viewBox="0 0 24 24"><path d="M5.5 12.5l4 4 9-9"/></svg></button>`).join("");
   menu.hidden = false;
   // The stage is scaled, so convert screen pixels back to stage pixels.
@@ -821,6 +821,26 @@ function wire() {
     else invoke("reveal", { id: null });
   });
   $("#folder-change").addEventListener("click", changeFolder);
+  $("#compress-video").addEventListener("click", async () => {
+    const button = $("#compress-video");
+    const status = $("#compression-status");
+    button.disabled = true;
+    status.textContent = "Elegí un video. Se creará una copia MP4 más liviana; el original se conserva.";
+    status.hidden = false;
+    try {
+      button.textContent = "Reduciendo…";
+      const result = await invoke("compress_video");
+      if (!result) { status.hidden = true; return; }
+      status.textContent = `${bytes(result.originalBytes)} → ${bytes(result.outputBytes)} · ${Math.round(result.savedPercent)}% menos. Guardado junto al original.`;
+      toast("Video liviano guardado");
+    } catch (error) {
+      status.textContent = String(error);
+      toast("No se creó una copia", true);
+    } finally {
+      button.disabled = false;
+      button.textContent = "Reducir video";
+    }
+  });
 
   $$(".qchip").forEach((c) => c.addEventListener("click", (e) => { e.stopPropagation(); openQualityMenu(c); }));
   $("#qmenu").addEventListener("click", (e) => {
@@ -924,6 +944,7 @@ function wire() {
 async function main() {
   const os = await invoke("platform").catch(() => "");
   MOBILE = os === "android" || os === "ios";
+  $("#compress-video").hidden = MOBILE;
   IOS = os === "ios";
   document.documentElement.classList.toggle("mobile", MOBILE);
   document.documentElement.classList.toggle("ios", IOS);

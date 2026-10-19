@@ -42,6 +42,14 @@ Tres pestañas, una para cada caso:
 
 Y además:
 
+- **Videos más livianos**: elegí **Liviano · hasta 720p** en el menú de calidad de Enlace o Canal.
+  Prioriza menor bitrate dentro de esa resolución. El tamaño depende de los formatos disponibles;
+  si el sitio no ofrece un video de hasta 720p, la descarga falla en lugar de bajar uno mayor.
+- **Reducir un video local (escritorio)**: el botón **Reducir video** crea un MP4 H.264/AAC de hasta
+  1280 × 720, con compresión con pérdida, junto al archivo elegido. Conserva el original y los archivos
+  existentes, muestra cuánto ahorró y descarta la copia si no pesa menos. El procesamiento puede tardar;
+  se convierte la primera pista de video y audio, sin subtítulos ni pistas adicionales.
+
 - **Sin preguntas**: no hay diálogo de "guardar como". Todo va a `Descargas/Oval`
   (cámbialo con el lápiz junto a la carpeta y se recuerda).
   Solo Canal crea subcarpetas: `Oval/Canal/elpepe.mp4`. Los enlaces individuales, audio
@@ -202,10 +210,18 @@ La extensión se empaqueta con `python extension/build.py`.
 
 ### Estructura
 
+Las pruebas de Rust (`cargo test --locked`) requieren FFmpeg en PATH e incluyen una compresión real.
+Con `yt-dlp==2026.08.19` instalado, `python -m unittest discover -s tests -p 'test_*.py'` verifica
+los extractores y la selección del perfil Liviano sin descargar videos. `node tests/test_urls.cjs`
+comprueba enlaces. La prueba opcional `node tests/test_ui.cjs` requiere Playwright y Chromium
+(Playwright accesible como dependencia de Node o mediante `NODE_PATH`); usa IPC simulado para
+comprobar el selector, persistencia, cancelación, resultado, errores y ventanas pequeñas.
+
 ```
 src/
   main.rs        comandos que usa la interfaz
   downloads.rs   cola, concurrencia, pausa/reanudar, grabación de directos
+  compression.rs copia local MP4 más liviana, con el original intacto
   channel.rs     listado de canales, perfiles y playlists
   tools.rs       descarga y actualización de yt-dlp y FFmpeg
   settings.rs    ajustes (carpeta, simultáneas)

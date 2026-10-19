@@ -17,6 +17,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - name: FFmpeg for compression tests
+        run: choco install ffmpeg -y --no-progress
       - name: Test
         run: |
           node tests/test_urls.cjs
@@ -28,6 +30,7 @@ jobs:
         run: |
           python -m pip install yt-dlp==2026.08.19
           python -m unittest discover -s tests -p test_kick_channel.py
+          python -m unittest discover -s tests -p test_light_download.py
       - name: Build
         run: npx --yes @tauri-apps/cli@2 build
       - name: Collect
@@ -50,7 +53,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file \
-            libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+            libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev patchelf ffmpeg
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - uses: actions/setup-node@v4

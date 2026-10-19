@@ -204,7 +204,10 @@ impl Queue {
         folder: Option<&str>,
         live: bool,
     ) -> Vec<Job> {
-        let quality = quality.filter(|q| !q.is_empty() && q.bytes().all(|b| b.is_ascii_digit()));
+        let quality = quality.filter(|q| {
+            (!q.is_empty() && q.bytes().all(|b| b.is_ascii_digit()))
+                || (*q == "light" && mode == Mode::Video && !live)
+        });
         let mut dir = download_root(app);
         if let Some(f) = folder.map(sanitize).filter(|f| !f.is_empty()) {
             dir.push(f);
@@ -571,11 +574,13 @@ async fn run_job(app: &AppHandle, id: u64, run: u64) -> Result<(), String> {
     // "res:1080" = the best stream no taller than 1080p. H.264/AAC wins ties so
     // files open everywhere, editors included; above 1080p YouTube has no H.264.
     let sort = match &quality {
+        Some(h) if h == "light" => "res:720,+br,vcodec:h264,acodec:aac".into(),
         Some(h) => format!("res:{h},vcodec:h264,acodec:aac"),
         None => "res,vcodec:h264,acodec:aac".into(),
     };
     let extra: Vec<String> = match mode {
         _ if live => live_args(sort),
+        Mode::Video if quality.as_deref() == Some("light") => light_video_args(sort),
         Mode::Video => video_args(sort),
         Mode::Audio => audio_args(quality.as_deref()),
     };
@@ -735,6 +740,21 @@ fn video_args(sort: String) -> Vec<String> {
     ]
     .map(String::from)
     .to_vec()
+}
+
+/// Prefer a lower bitrate at up to 720p; never silently fall back to a 4K stream.
+fn light_video_args(sort: String) -> Vec<String> {
+    let mut args = video_args(sort);
+    let format = args.iter().position(|arg| arg == "-f").unwrap() + 1;
+    #[cfg(not(target_os = "ios"))]
+    {
+        args[format] = "bv*[height<=720]+ba/b[height<=720]".into();
+    }
+    #[cfg(target_os = "ios")]
+    {
+        args[format] = "bv*[height<=720][vcodec^=avc1]+ba[ext=m4a]/b[height<=720][ext=mp4]/bv*[height<=720][ext=mp4]+ba[ext=m4a]/b[height<=720]".into();
+    }
+    args
 }
 
 /// AVFoundation joins H.264 + AAC into MP4 without re-encoding, so iOS asks

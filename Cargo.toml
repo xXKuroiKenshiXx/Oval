@@ -31,6 +31,7 @@ zip = { version = "2", default-features = false, features = ["deflate"] }
 trash = "5"
 tauri-plugin-dialog = "2"
 tiny_http = "0.12"
+tempfile = "3"
 tauri-plugin-deep-link = "2"
 tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
 

@@ -4,6 +4,8 @@
 #[cfg(desktop)]
 mod bridge;
 mod channel;
+#[cfg(desktop)]
+mod compression;
 mod downloads;
 mod engine;
 #[cfg(desktop)]
@@ -174,6 +176,45 @@ fn platform() -> &'static str {
 #[tauri::command]
 fn download_folder(app: AppHandle) -> String {
     downloads::download_root(&app).display().to_string()
+}
+
+/// Compress a user-selected local video; cancellation leaves everything untouched.
+#[tauri::command]
+async fn compress_video(app: AppHandle) -> Result<Option<serde_json::Value>, String> {
+    #[cfg(desktop)]
+    {
+        use tauri_plugin_dialog::DialogExt;
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let mut dialog = app
+            .dialog()
+            .file()
+            .set_title("Reducir peso de un video")
+            .add_filter(
+                "Videos",
+                &[
+                    "mp4", "mkv", "mov", "webm", "avi", "m4v", "mpeg", "mpg", "wmv", "ts",
+                ],
+            );
+        if let Some(window) = app.get_webview_window("main") {
+            dialog = dialog.set_parent(&window);
+        }
+        dialog.pick_file(move |file| {
+            let _ = tx.send(file);
+        });
+        let Some(file) = rx.await.map_err(|e| e.to_string())? else {
+            return Ok(None);
+        };
+        let input = file.into_path().map_err(|e| e.to_string())?;
+        let tools = tools::ensure(&app).await?;
+        compression::compress(&tools.ffmpeg(), &input)
+            .await
+            .map(Some)
+    }
+    #[cfg(mobile)]
+    {
+        let _ = app;
+        Err("La compresión de archivos locales está disponible en escritorio.".into())
+    }
 }
 
 /// Lets the user pick where downloads go; `None` if the dialog was dismissed.
@@ -352,6 +393,7 @@ pub fn run() {
             platform,
             download_folder,
             choose_folder,
+            compress_video,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Oval");
