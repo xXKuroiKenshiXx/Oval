@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [0.5.4] - 2026-11-09
+
+### Added
+- Selector de pista de audio: al pegar un enlace con varios idiomas (doblajes de YouTube)
+  aparece un chip para elegir cuál descargar, en MP4 o MP3. «Automática» mantiene la principal.
+
 ## [0.5.3] - 2026-10-19
 
 ### Added

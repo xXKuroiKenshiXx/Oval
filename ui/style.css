@@ -895,6 +895,7 @@ button.pill-icon:hover { background: var(--surface-2); color: var(--text); }
 .qchip svg { width: 15px; height: 15px; stroke-width: 2; transition: transform 0.3s var(--ease); }
 .qchip:hover, .qchip.open { background: var(--surface-3); color: var(--text); }
 .qchip.open svg { transform: rotate(180deg); }
+.qchip[hidden] { display: none; }
 
 .menu {
   position: absolute;

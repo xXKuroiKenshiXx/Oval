@@ -52,6 +52,8 @@ pub struct Job {
     pub mode: Mode,
     /// Max video height ("1080") or audio bitrate in kbps ("192"); `None` = best.
     pub quality: Option<String>,
+    /// Audio language to download ("es-US"); `None` = the site's default.
+    pub audio: Option<String>,
     pub title: String,
     pub thumbnail: Option<String>,
     pub status: Status,
@@ -105,6 +107,9 @@ pub struct NewJob {
     pub section: Option<Section>,
     #[serde(default)]
     pub precise: bool,
+    /// Audio language picked in the app ("es-US").
+    #[serde(default)]
+    pub audio: Option<String>,
     /// Absolute folder chosen outside the app (browser extension).
     #[serde(skip)]
     pub dir: Option<PathBuf>,
@@ -230,6 +235,7 @@ impl Queue {
                     url,
                     mode,
                     quality: quality.map(str::to_string),
+                    audio: item.audio.filter(|l| crate::tracks::valid_lang(l) && !live),
                     thumbnail: item.thumbnail,
                     status: Status::Queued,
                     progress: 0.0,
@@ -500,7 +506,7 @@ fn retry_if_blocked(app: &AppHandle, id: u64) {
 }
 
 async fn run_job(app: &AppHandle, id: u64, run: u64) -> Result<(), String> {
-    let (url, mode, quality, dir, live, section, precise) = {
+    let (url, mode, quality, audio, dir, live, section, precise) = {
         let q = queue(app);
         let jobs = q.jobs.lock().unwrap();
         match jobs.iter().find(|j| j.id == id && j.run == run) {
@@ -508,6 +514,7 @@ async fn run_job(app: &AppHandle, id: u64, run: u64) -> Result<(), String> {
                 j.url.clone(),
                 j.mode,
                 j.quality.clone(),
+                j.audio.clone(),
                 j.dir.clone(),
                 j.live,
                 j.section,
@@ -584,6 +591,12 @@ async fn run_job(app: &AppHandle, id: u64, run: u64) -> Result<(), String> {
         Mode::Video => video_args(sort),
         Mode::Audio => audio_args(quality.as_deref()),
     };
+    let mut extra = extra;
+    if let (Some(lang), false) = (audio.as_deref(), live) {
+        if let Some(i) = extra.iter().position(|a| a == "-f") {
+            extra[i + 1] = crate::tracks::with_language(&extra[i + 1], lang);
+        }
+    }
     args.extend(extra);
     if let Some(section) = section {
         clip_args(&mut args, section, precise);

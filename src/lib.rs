@@ -17,6 +17,7 @@ mod platform;
 mod settings;
 #[cfg(desktop)]
 mod tools;
+mod tracks;
 mod transcript;
 
 use downloads::{Job, Mode, NewJob, Queue};
@@ -40,9 +41,11 @@ fn add_download(
     url: String,
     mode: Mode,
     quality: Option<String>,
+    audio: Option<String>,
 ) -> Vec<Job> {
     let item = NewJob {
         url,
+        audio,
         ..NewJob::default()
     };
     queue.add(&app, vec![item], mode, quality.as_deref(), None, false)
@@ -135,6 +138,18 @@ fn set_concurrency(app: AppHandle, value: u32) -> u32 {
     let s = settings::update(&app, |s| s.concurrency = value.clamp(1, 8));
     downloads::schedule(&app);
     s.concurrency
+}
+
+/// Audio languages of a video, so the user can pick one; empty when there is no choice.
+#[tauri::command]
+async fn audio_tracks(app: AppHandle, url: String) -> Result<Vec<tracks::AudioTrack>, String> {
+    #[cfg(desktop)]
+    return tracks::list(&app, &url).await;
+    #[cfg(not(desktop))]
+    {
+        let _ = (app, url);
+        Ok(Vec::new())
+    }
 }
 
 #[tauri::command]
@@ -374,6 +389,7 @@ pub fn run() {
             app_version,
             jobs,
             add_download,
+            audio_tracks,
             add_many,
             add_live,
             stop_live,

@@ -189,8 +189,42 @@ const quality = { video: store.get("q-video", ""), audio: store.get("q-audio", "
 const qualityKey = (ctx) => (ctx === "live" ? "live" : mode);
 const currentQuality = (ctx) => quality[qualityKey(ctx)] || null;
 
+/* Audio tracks of the link in the box (YouTube dubs). Empty list = no choice. */
+const audioTracks = { url: "", list: [], lang: "" };
+const escHtml = (t) => String(t).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+let trackTimer = 0;
+let trackProbe = 0;
+
+function renderTracks() {
+  const chip = $('.qchip[data-ctx="track"]');
+  chip.hidden = audioTracks.list.length < 2;
+  const t = audioTracks.list.find((x) => x.lang === audioTracks.lang);
+  $(".qlabel", chip).textContent = t ? t.lang.split("-")[0].toUpperCase() : "Auto";
+}
+
+/** Looks up the audio tracks of the link being typed, once it settles. */
+function probeTracks(text) {
+  clearTimeout(trackTimer);
+  const urls = extractUrls(text);
+  const url = urls.length === 1 && !isCollection(urls[0]) && !isLive(urls[0]) ? urls[0] : "";
+  if (url === audioTracks.url) return;
+  Object.assign(audioTracks, { url, list: [], lang: "" });
+  renderTracks();
+  if (!url) return;
+  const ticket = ++trackProbe;
+  trackTimer = setTimeout(async () => {
+    try {
+      const list = await invoke("audio_tracks", { url });
+      if (ticket !== trackProbe) return;
+      audioTracks.list = list;
+      renderTracks();
+    } catch (e) { /* no tracks: download as usual */ }
+  }, 500);
+}
+
 function renderQuality() {
   for (const chip of $$(".qchip")) {
+    if (chip.dataset.ctx === "track") continue;
     const key = qualityKey(chip.dataset.ctx);
     const entry = QUALITIES[key].find(([v]) => v === quality[key]) || QUALITIES[key][0];
     $(".qlabel", chip).textContent = entry[2];
@@ -201,6 +235,14 @@ let menuChip = null;
 function openQualityMenu(chip) {
   if (menuChip === chip) return closeMenu();
   const menu = $("#qmenu");
+  if (chip.dataset.ctx === "track") {
+    menu.dataset.key = "track";
+    const tick = '<svg class="tick" viewBox="0 0 24 24"><path d="M5.5 12.5l4 4 9-9"/></svg>';
+    menu.innerHTML = '<div class="menu-title">Pista de audio</div>' +
+      [{ lang: "", label: "Automática", note: "la principal del video" }].concat(audioTracks.list).map((t) =>
+        `<button type="button" role="menuitemradio" data-q="${escHtml(t.lang)}" class="${t.lang === audioTracks.lang ? "on" : ""}">` +
+        `<span>${escHtml(t.label)}${t.note ? ` <small>${t.note}</small>` : t.original ? " <small>original</small>" : ""}</span>${tick}</button>`).join("");
+  } else {
   const key = qualityKey(chip.dataset.ctx);
   menu.dataset.key = key;
   menu.innerHTML =
@@ -209,6 +251,7 @@ function openQualityMenu(chip) {
       `<button type="button" role="menuitemradio" data-q="${v}" class="${v === quality[key] ? "on" : ""}">` +
       `<span>${label}${v === "" ? " <small>la mejor disponible</small>" : v === "light" ? " <small>menor bitrate; tamaño según el sitio</small>" : ""}</span>` +
       `<svg class="tick" viewBox="0 0 24 24"><path d="M5.5 12.5l4 4 9-9"/></svg></button>`).join("");
+  }
   menu.hidden = false;
   // The stage is scaled, so convert screen pixels back to stage pixels.
   const stage = $("#stage");
@@ -463,7 +506,10 @@ async function addLinks(text) {
   }
   for (const url of urls) {
     if (isLive(url)) await startRecording(url);
-    else await invoke("add_download", { url, mode, quality: currentQuality("link") });
+    else {
+      const audio = urls.length === 1 && audioTracks.url === url && audioTracks.lang ? audioTracks.lang : null;
+      await invoke("add_download", { url, mode, quality: currentQuality("link"), audio });
+    }
   }
   if (urls.length > 1) toast(`${urls.length} descargas en cola`);
   return true;
@@ -792,6 +838,7 @@ function wire() {
     if (await addLinks(input.value)) {
       lastClip = input.value.trim() || lastClip;
       input.value = "";
+      probeTracks("");
     }
   });
 
@@ -814,7 +861,9 @@ function wire() {
     const input = $("#url");
     if (text) input.value = text.trim();
     input.focus();
+    probeTracks(input.value);
   });
+  $("#url").addEventListener("input", (e) => probeTracks(e.target.value));
 
   $("#folder").addEventListener("click", () => {
     if (MOBILE) toast(`Las descargas están en ${PHONE_FOLDER}`);
@@ -848,6 +897,12 @@ function wire() {
     const b = e.target.closest("button[data-q]");
     if (!b) return;
     const key = $("#qmenu").dataset.key;
+    if (key === "track") {
+      audioTracks.lang = b.dataset.q;
+      renderTracks();
+      closeMenu();
+      return;
+    }
     quality[key] = b.dataset.q;
     store.set(`q-${key}`, b.dataset.q);
     renderQuality();

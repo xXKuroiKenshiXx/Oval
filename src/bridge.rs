@@ -273,6 +273,7 @@ fn download(app: &AppHandle, body: &Value) -> Answer {
             .get("precise")
             .and_then(Value::as_bool)
             .unwrap_or(false),
+        audio: str_field(body, "audio").map(String::from),
         dir: if custom {
             Some(folder(app, body)?)
         } else {
